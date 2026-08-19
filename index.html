@@ -1,0 +1,13 @@
+<meta charset="utf-8">
+<title>Lunchquest — Autoplaying RPG</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0c10;overflow:hidden;
+    font-family:ui-monospace,"DejaVu Sans Mono",monospace;color:#cfd6e4}
+  #wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{image-rendering:pixelated;width:100%;height:100%;object-fit:contain;
+    background:#0a0c10}
+  #hint{position:absolute;bottom:4px;left:6px;font-size:11px;opacity:.35}
+</style>
+<div id="wrap"><canvas id="c" width="960" height="540"></canvas></div>
+<div id="hint">lunchquest — plays itself. refresh for a fresh seed.</div>
+<script src="game.js"></script>
