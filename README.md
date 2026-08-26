@@ -36,7 +36,7 @@ the first wall or body, apply damage there, and draw a tracer along the path. Tr
 rock block a shot; water doesn't. Archers and imps use it, boss breath uses it (so line of
 sight now matters), and so does the hero once it finds a bow.
 
-Bows are a fourth gear slot with their own ladder — ash → yew → horn → dragonbone —
+Bows are a gear slot with their own ladder — ash → yew → elven → glass → dragonbone —
 raising both damage and range (6–9 tiles). Arrows are finite: quivers lie on the ground,
 archers and imps drop what they were carrying, and the hero tops up at 24. It keeps the
 last couple of arrows in reserve for bosses and closes to melee otherwise.
@@ -48,13 +48,52 @@ the hero saves them for targets that deserve them: **fire** explodes for splash 
 distance). Melee monsters now break into a run when they're being shot at, so kiting
 isn't free.
 
+## Seeds
+
+Every run is one seed. It decides the island layout of all five floors, which four bosses
+you draw and in what order, where the hero starts, and every item and chest roll — the
+things a run's success actually hangs on. The seed shows in the HUD and on the death and
+victory cards, and `?seed=1a2b3c` replays it exactly. Combat rolls stay unseeded, so a
+replayed seed gives you the same world and the same kit, not the same fight.
+
 ## Worldgen
 
-fBm value noise (5 octaves) for elevation, a second noise field for moisture, and a
-radial falloff, giving water / sand / grass / meadow / forest / rock biomes on an island.
-A connected-component flood fill picks the main landmass (dud seeds are rejected and
-re-rolled), drunken-walk trails are carved between landmarks, and everything spawns on
-the reachable component — so the hero can always path to what it wants.
+A 160x160 archipelago. Three to six island centres are scattered with a channel kept
+between them, and land is the union of their falloffs, so the water between islands is
+genuinely deep. On top of that: fBm value noise (5 octaves) for elevation and a second
+field for moisture, giving water / sand / grass / meadow / forest / rock biomes. A
+connected-component flood fill catalogues every island (seeds that produce only one are
+rejected and re-rolled), and trails are carved within each.
+
+The boss holds a different island about two thirds of the time, and every island past the
+first has an ornate chest on it. That is what the boat is for.
+
+## Boats and woodcraft
+
+The hero cannot swim. To reach another island it has to find an axe, fell trees for wood
+(each tree takes a few turns and the tile really does become grass), carry six wood to a
+shore tile, and spend five turns building a boat. Driftwood on the beaches is a shortcut
+when no axe has turned up. Boats don't survive the descent to the next floor — the axe
+does — so each floor poses the problem again with a better kit.
+
+Monsters can't follow onto water, but archers and boss breath still reach you out there.
+
+## Loot
+
+Five material tiers — iron, steel, elven, glass, ebony (bows: ash, yew, elven, glass,
+dragonbone) — weighted toward the current floor, so what a floor can even offer is part
+of the run's shape.
+
+Loot can carry one enchantment, which is where most of the run-to-run variance lives:
+*keen* and *cruel* add damage, *vampiric* leeches a quarter of melee damage back,
+*burning* sets fire to what it hits, *sturdy* and *warded* harden the hero, *swift* adds
+bow range. The hero values a piece by tier and enchantment together, so a keen steel blade
+can beat a plain elven one.
+
+Chests roll real contents rather than a pile of gold: coin, potions, arrows, wood, gear,
+and the occasional elemental arrow. The hero equips what beats its kit and drops the rest
+on the ground. Ornate chests — the ones across the water — roll more, roll richer, and
+always contain a piece of gear.
 
 ## The brain
 
@@ -84,5 +123,5 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 `window.LQ` exposes `hero()`, `mobs()`, `items()`, `stats()`, `run()`, `phase()`, and
 `boss()` for a live run. URL params for development: `?card=died|cleared|victory|title`
 freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
-orichalcum, a dragonbone bow and elemental arrows, and `?parade=1` lines up the whole
-bestiary next to a frozen hero.
+ebony, a dragonbone bow and elemental arrows, `?seed=hex` replays a run, and `?parade=1`
+lines up the whole bestiary next to a frozen hero.

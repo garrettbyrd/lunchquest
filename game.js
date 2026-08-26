@@ -34,7 +34,7 @@ function makeNoise(rnd) {
 }
 
 /* ---------------- constants ---------------- */
-var TILE = 24, W = 100, H = 100;
+var TILE = 24, W = 160, H = 160;
 var CW = 960, CH = 540, VPW = 716, VPH = 540;
 var DEEP = 0, WATER = 1, SAND = 2, GRASS = 3, TALL = 4, TREE = 5, ROCK = 6, PATH = 7, FLOWER = 8;
 var WALK = [0, 0, 1, 1, 1, 0, 0, 1, 1];
@@ -59,24 +59,53 @@ var FLOORDEF = [
 
 /* ---------------- gear ---------------- */
 var MATS = [
-  { n: 'iron',       col: '#9aa2ad', edge: '#d6dae0' },
-  { n: 'steel',      col: '#7fa8c9', edge: '#dff0ff' },
-  { n: 'electrum',   col: '#e0c469', edge: '#fff4c2' },
-  { n: 'orichalcum', col: '#4fd6b8', edge: '#d3fff5' }
+  { n: 'iron',  col: '#9aa2ad', edge: '#d6dae0' },
+  { n: 'steel', col: '#7fa8c9', edge: '#dff0ff' },
+  { n: 'elven', col: '#c9d6a8', edge: '#f2ffd9' },
+  { n: 'glass', col: '#6fd8c0', edge: '#d3fff5' },
+  { n: 'ebony', col: '#6b6480', edge: '#c3b8e0' }
 ];
+/* enchantments: the main source of run-to-run variance in a kit */
+var AFFIX = {
+  keen:     { on: ['sword', 'bow'],      atk: 3,      col: '#ffd166' },
+  cruel:    { on: ['sword'],             atk: 6,      col: '#ff8a8a' },
+  vampiric: { on: ['sword'],             leech: 0.25, col: '#d86a8a' },
+  burning:  { on: ['sword', 'bow'],      fire: 1,     col: '#ff8a3d' },
+  sturdy:   { on: ['shield', 'armor'],   def: 2,      col: '#9fd8e6' },
+  warded:   { on: ['shield', 'armor'],   hp: 14,      col: '#8ef2a0' },
+  swift:    { on: ['bow', 'axe'],        rng: 1,      col: '#cfe6ff' }
+};
+var AFFIXKEYS = Object.keys(AFFIX);
+function affixFor(slot, rnd, chance) {
+  if (rnd() > chance) return null;
+  var ok = [];
+  for (var i = 0; i < AFFIXKEYS.length; i++) if (AFFIX[AFFIXKEYS[i]].on.indexOf(slot) >= 0) ok.push(AFFIXKEYS[i]);
+  return ok.length ? ok[rnd() * ok.length | 0] : null;
+}
+function affixWorth(a) {
+  if (!a) return 0;
+  var A = AFFIX[a];
+  return (A.atk || 0) + (A.def || 0) * 2 + (A.hp || 0) * 0.3 + (A.leech ? 5 : 0) + (A.fire ? 5 : 0) + (A.rng ? 4 : 0);
+}
+function gearName(slot, tier, affix) {
+  return (affix ? affix + ' ' : '') + matsFor(slot)[tier].n + ' ' + SLOTS[slot].label;
+}
 var BOWMATS = [
   { n: 'ash',        col: '#a8794a', edge: '#d9b487' },
   { n: 'yew',        col: '#7c9b5a', edge: '#cfe6a8' },
-  { n: 'horn',       col: '#c9bfa0', edge: '#fff2d0' },
+  { n: 'elven',      col: '#c9d6a8', edge: '#f2ffd9' },
+  { n: 'glass',      col: '#6fd8c0', edge: '#d3fff5' },
   { n: 'dragonbone', col: '#d8607a', edge: '#ffd0dc' }
 ];
 var SLOTS = {
-  sword:  { atk: [4, 8, 13, 20],   label: 'blade'  },
-  shield: { def: [1, 3, 5, 8],     label: 'shield' },
-  armor:  { hp:  [10, 22, 38, 60], label: 'armor'  },
-  bow:    { pow: [3, 6, 11, 16], rng: [6, 7, 8, 9], label: 'bow', mats: BOWMATS }
+  sword:  { atk: [4, 8, 13, 19, 26],    label: 'blade'  },
+  shield: { def: [1, 3, 5, 8, 11],      label: 'shield' },
+  armor:  { hp:  [10, 22, 38, 58, 82],  label: 'armor'  },
+  bow:    { pow: [3, 6, 11, 16, 22], rng: [6, 7, 8, 8, 9], label: 'bow', mats: BOWMATS },
+  axe:    { chop: [4, 3, 2, 2, 1], label: 'axe' }
 };
-var SLOTKEYS = ['sword', 'shield', 'armor', 'bow'];
+var SLOTKEYS = ['sword', 'shield', 'armor', 'bow', 'axe'];
+var BOAT_WOOD = 6, BOAT_TURNS = 5;
 var QUIVER_MAX = 24;
 var ELEMENTS = {
   fire:  { n: 'fire',  col: '#ff8a3d', edge: '#ffd7a8', fx: 'blast' },
@@ -99,7 +128,7 @@ var BOSSES = [
   { n: 'Malzeth the Necromancer', s: 'Malzeth', shape: 'robed',  hp: 130, atk: 11, def: 2, ev: 2, aggro: 8, ab: 'summon', col: '#6d4fa8', col2: '#2e1f4d', size: 2.1 },
   { n: 'The Hollow Wraith', s: 'the Wraith',     shape: 'spectre',  hp: 125, atk: 13, def: 2, ev: 1, aggro: 6, ab: 'drain',  col: '#9fd8e6', col2: '#2a4a55', size: 2.0 }
 ];
-var LICH = { n: 'Xanthemar, the Undying', s: 'Xanthemar', shape: 'lich', hp: 430, atk: 26, def: 7, ev: 2, aggro: 9, ab: 'lich', col: '#cfe6ff', col2: '#3b2a5e', size: 2.4 };
+var LICH = { n: 'Xanthemar, the Undying', s: 'Xanthemar', shape: 'lich', hp: 700, atk: 32, def: 9, ev: 2, aggro: 9, ab: 'lich', col: '#cfe6ff', col2: '#3b2a5e', size: 2.4 };
 
 var MTYPES = [
   { k: 'slime',    hp: 12, atk: 3, def: 0, ev: 2, aggro: 7,  gold: 3,  xp: 5,  col: '#6ad36f', dark: '#2f7a37' },
@@ -185,10 +214,28 @@ function genWorld(seed) {
   var rnd = mulberry32(seed);
   var n1 = makeNoise(mulberry32(seed ^ 0x9E3779B9)), n2 = makeNoise(mulberry32(seed ^ 0x85EBCA6B));
   var tiles = new Uint8Array(W * H), variant = new Uint8Array(W * H), x, y, i;
+
+  /* scatter a few island centres, keeping them apart; land is the union of
+     their falloffs, so the sea between them is genuinely deep */
+  var cores = [], want = 3 + (rnd() * 3 | 0);
+  for (var a = 0; a < want * 14 && cores.length < want; a++) {
+    var cx0 = 22 + rnd() * (W - 44), cy0 = 22 + rnd() * (H - 44), rr = 20 + rnd() * 20, ok = 1;
+    for (var b = 0; b < cores.length; b++) {
+      if (Math.hypot(cores[b].x - cx0, cores[b].y - cy0) < cores[b].r + rr + 9) { ok = 0; break; }
+    }
+    if (ok) cores.push({ x: cx0, y: cy0, r: rr, sq: 0.7 + rnd() * 0.9 });
+  }
+  if (!cores.length) cores.push({ x: W / 2, y: H / 2, r: 34, sq: 1 });
+
   for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
+    var mask = 0;
+    for (var c = 0; c < cores.length; c++) {
+      var C = cores[c], ddx = (x - C.x) / C.r, ddy = (y - C.y) / (C.r * C.sq);
+      var infl = 1 - Math.pow(Math.min(1, Math.sqrt(ddx * ddx + ddy * ddy)), 1.7);
+      if (infl > mask) mask = infl;
+    }
     var e = n1(x, y, 5, 0.055), m = n2(x, y, 4, 0.085);
-    var dx = (x / (W - 1) - 0.5) * 2, dy = (y / (H - 1) - 0.5) * 2;
-    e = e * 1.08 - Math.max(0, Math.sqrt(dx * dx + dy * dy) - 0.50) * 1.6;
+    e = e * 0.58 + mask * 0.62 - 0.30;
     var t;
     if (e < 0.30) t = DEEP;
     else if (e < 0.355) t = WATER;
@@ -220,9 +267,14 @@ function genWorld(seed) {
     if (list.length > bestN) { bestN = list.length; best = id; }
   }
   if (best < 0 || bestN < 500) return null;
+  var islands = [];
+  for (i = 0; i < comps.length; i++) if (comps[i].length >= 90) islands.push({ id: i, tiles: comps[i] });
+  islands.sort(function (p2, q2) { return q2.tiles.length - p2.tiles.length; });
+  if (islands.length < 2) return null;                        /* we want an archipelago */
   var land = comps[best];
-  for (var p = 0; p < 4; p++) {
-    var a = land[rnd() * land.length | 0], b = land[rnd() * land.length | 0];
+  for (var p = 0; p < islands.length * 2; p++) {
+    var isl = islands[p % islands.length].tiles;
+    var a = isl[rnd() * isl.length | 0], b = isl[rnd() * isl.length | 0];
     var ax = a % W, ay = (a - ax) / W, bx = b % W, by = (b - bx) / W, guard = 0;
     while ((ax !== bx || ay !== by) && guard++ < 900) {
       if (WALK[tiles[ay * W + ax]] && tiles[ay * W + ax] !== SAND) tiles[ay * W + ax] = PATH;
@@ -233,7 +285,9 @@ function genWorld(seed) {
   }
   var mm = newCanvas(W, H), mg = mm.getContext('2d');
   for (y = 0; y < H; y++) for (x = 0; x < W; x++) { mg.fillStyle = MINI[tiles[y * W + x]]; mg.fillRect(x, y, 1, 1); }
-  return { seed: seed, tiles: tiles, variant: variant, land: land, mini: mm, rnd: rnd };
+  var trees = [];
+  for (i = 0; i < W * H; i++) if (tiles[i] === TREE) trees.push(i);
+  return { seed: seed, tiles: tiles, variant: variant, land: land, comp: comp, islands: islands, trees: trees, mini: mm, rnd: rnd };
 }
 function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : world.tiles[y * W + x]; }
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
@@ -250,7 +304,9 @@ function setPhase(name, dur) { phase = { name: name, t: 0, dur: dur }; }
 function newHero() {
   var h = { x: 0, y: 0, px: 0, py: 0, lvl: 1, xp: 0, next: 22, gold: 0, kills: 0, bosses: 0,
             baseAtk: 5, baseDef: 1, baseMax: 44, potions: 2, arrows: 0, ammo: { fire: 0, frost: 0, shock: 0 },
-            gear: { sword: 0, shield: -1, armor: -1, bow: -1 },
+            gear: { sword: 0, shield: -1, armor: -1, bow: -1, axe: -1 },
+            affix: { sword: null, shield: null, armor: null, bow: null, axe: null },
+            wood: 0, boat: 0, chop: null, build: null,
             face: 2, swing: 0, hurt: 0, intent: 'descending', lock: null, lockT: 0,
             hist: [], lastProgress: 0, ban: {} };
   recalc(h); h.hp = h.max; return h;
@@ -261,6 +317,18 @@ function recalc(h) {
   h.max = h.baseMax + (h.gear.armor >= 0 ? SLOTS.armor.hp[h.gear.armor] : 0);
   h.rpow = h.gear.bow >= 0 ? SLOTS.bow.pow[h.gear.bow] : 0;
   h.rng = h.gear.bow >= 0 ? SLOTS.bow.rng[h.gear.bow] : 0;
+  h.leech = 0; h.burn = 0;
+  for (var si = 0; si < SLOTKEYS.length; si++) {
+    var sk = SLOTKEYS[si], af = h.affix[sk];
+    if (!af || h.gear[sk] < 0) continue;
+    var A = AFFIX[af];
+    if (A.atk) { if (sk === 'bow') h.rpow += A.atk; else h.atk += A.atk; }
+    if (A.def) h.def += A.def;
+    if (A.hp) h.max += A.hp;
+    if (A.rng && sk === 'bow') h.rng += A.rng;
+    if (A.leech) h.leech = A.leech;
+    if (A.fire) h.burn = 1;
+  }
   if (h.hp > h.max) h.hp = h.max;
 }
 function occupied(x, y) {
@@ -268,38 +336,48 @@ function occupied(x, y) {
   for (var i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return true;
   return false;
 }
-function freeSpot(rnd, from, minD) {
+function islandAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? -1 : world.comp[y * W + x]; }
+function islandTiles(id) {
+  for (var i = 0; i < world.islands.length; i++) if (world.islands[i].id === id) return world.islands[i].tiles;
+  return world.land;
+}
+function freeSpot(rnd, from, minD, island) {
+  var pool = island === undefined ? world.land : islandTiles(island);
   for (var t = 0; t < 500; t++) {
-    var c = world.land[rnd() * world.land.length | 0], x = c % W, y = (c - x) / W;
+    var c = pool[rnd() * pool.length | 0], x = c % W, y = (c - x) / W;
     if (occupied(x, y)) continue;
     if (from && Math.abs(x - from.x) + Math.abs(y - from.y) < minD) continue;
     return { x: x, y: y };
   }
-  var c2 = world.land[0];
+  var c2 = pool[0];
   return { x: c2 % W, y: (c2 - c2 % W) / W };
 }
 
 /* ---------------- run / floor setup ---------------- */
-function newRun() {
+function newRun(seed) {
+  if (seed === undefined || !isFinite(seed)) seed = (Math.random() * 0x7FFFFFFF) | 0;
+  var rng = mulberry32(seed);
   var order = BOSSES.slice(), i, j, tmp;
-  for (i = order.length - 1; i > 0; i--) { j = Math.random() * (i + 1) | 0; tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
-  run = { n: (run ? run.n + 1 : 1), floor: 1, floorStart: tick, plan: order.slice(0, FLOORS - 1) };
+  for (i = order.length - 1; i > 0; i--) { j = rng() * (i + 1) | 0; tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
+  run = { n: (run ? run.n + 1 : 1), seed: seed >>> 0, rng: rng, floor: 1, floorStart: tick, plan: order.slice(0, FLOORS - 1) };
   hero = newHero();
-  say('run ' + run.n + ' begins');
+  say('run ' + run.n + ' \u00b7 seed ' + run.seed.toString(16));
   buildFloor(1);
 }
 
 function buildFloor(floor) {
   var w = null, attempt = 0;
-  do { w = genWorld((Math.random() * 0x7FFFFFFF) | 0); } while (!w && ++attempt < 30);
+  do { w = genWorld((run.rng() * 0x7FFFFFFF) | 0); } while (!w && ++attempt < 30);
   world = w || genWorld(12345);
   sheet = sheetFor(floor);
   applyRecipe(world.mini, FLOORDEF[clamp(floor - 1, 0, FLOORDEF.length - 1)].recipe);
   var rnd = world.rnd;
   mobs = []; items = []; floats = []; shots = []; fx = [];
-  var spot = freeSpot(rnd, null, 0);
+  world.home = world.islands[0].id;
+  var spot = freeSpot(rnd, null, 0, world.home);
   hero.x = spot.x; hero.y = spot.y; hero.px = spot.x; hero.py = spot.y;
   hero.lock = null; hero.lockT = 0; hero.ban = {}; hero.hist = []; hero.lastProgress = tick;
+  hero.boat = 0; hero.sailing = 0; hero.chop = null; hero.build = null;
 
   /* rank-and-file */
   var pool = [];
@@ -308,41 +386,54 @@ function buildFloor(floor) {
     for (var j = 0; j < wgt + (i === 0 && floor < 3 ? 1 : 0); j++) pool.push(i);
   }
   if (!pool.length) pool.push(1);
-  var nmob = 7 + floor * 3, mscale = 1 + 0.45 * (floor - 1);
+  var nmob = 7 + floor * 3 + (floor > 3 ? 4 : 0), mscale = 1 + 0.62 * (floor - 1);
   for (var m = 0; m < nmob; m++) {
-    var T = MTYPES[pool[rnd() * pool.length | 0]], s = freeSpot(rnd, hero, floor === 1 ? 15 : 10);
+    var T = MTYPES[pool[rnd() * pool.length | 0]], s = freeSpot(rnd, hero, floor === 1 ? 15 : 10, world.home);
     mobs.push({ id: nextId++, t: T, boss: 0, name: T.k, x: s.x, y: s.y, px: s.x, py: s.y,
       hp: Math.round(T.hp * mscale), max: Math.round(T.hp * mscale),
-      atk: T.atk + (floor - 1) * 2, def: T.def + (floor > 2 ? 1 : 0) + (floor > 4 ? 1 : 0), ev: T.ev,
+      atk: T.atk + Math.round((floor - 1) * 2.6), def: T.def + (floor > 2 ? 1 : 0) + (floor > 4 ? 1 : 0), ev: T.ev,
       face: 2, hurt: 0, swing: 0, wake: 0 });
   }
 
   /* the floor's boss */
   var B = floor >= FLOORS ? LICH : run.plan[floor - 1];
-  var bs = freeSpot(rnd, hero, 42);
-  var bScale = floor >= FLOORS ? 1 : (0.55 + 0.22 * floor);
+  /* the boss often holds a different island — that is what the boat is for */
+  var away = world.islands.length > 1 && rnd() < 0.65 ? world.islands[1 + (rnd() * (world.islands.length - 1) | 0)].id : world.home;
+  var bs = freeSpot(rnd, hero, away === world.home ? 42 : 10, away);
+  var bScale = floor >= FLOORS ? 1 : (0.62 + 0.30 * floor);
   mobs.push({ id: nextId++, t: B, boss: 1, name: B.n, sname: B.s, shape: B.shape, ab: B.ab, size: B.size,
     x: bs.x, y: bs.y, px: bs.x, py: bs.y,
     hp: Math.round(B.hp * bScale), max: Math.round(B.hp * bScale),
-    atk: Math.round(B.atk * (floor >= FLOORS ? 1 : 0.62 + 0.15 * floor)), def: B.def, ev: B.ev,
+    atk: Math.round(B.atk * (floor >= FLOORS ? 1 : 0.64 + 0.19 * floor)), def: B.def + (floor > 2 ? 1 : 0), ev: B.ev,
     col: B.col, col2: B.col2, face: 2, hurt: 0, swing: 0, wake: 0, cd: 0 });
 
   /* loot: chests, potions, and gear of a tier that tracks the floor */
-  for (var c = 0; c < 4 + (floor % 3); c++) { var cs = freeSpot(rnd, hero, 5); items.push({ id: nextId++, kind: 'chest', x: cs.x, y: cs.y, bob: rnd() * 6 }); }
-  for (var p = 0; p < 3 + (floor > 2 ? 1 : 0); p++) { var ps = freeSpot(rnd, hero, 4); items.push({ id: nextId++, kind: 'potion', x: ps.x, y: ps.y, bob: rnd() * 6 }); }
+  for (var c = 0; c < 4 + (floor % 3); c++) {
+    var cs = freeSpot(rnd, hero, 5, world.home);
+    items.push({ id: nextId++, kind: 'chest', loot: rollLoot(floor, 0, rnd), x: cs.x, y: cs.y, bob: rnd() * 6 });
+  }
+  for (var p = 0; p < 3 + (floor > 2 ? 1 : 0); p++) { var ps = freeSpot(rnd, hero, 4, world.home); items.push({ id: nextId++, kind: 'potion', x: ps.x, y: ps.y, bob: rnd() * 6 }); }
+  for (var dw = 0; dw < 2; dw++) {                            /* driftwood on the sand */
+    var ds = freeSpot(rnd, hero, 6, world.home);
+    items.push({ id: nextId++, kind: 'wood', n: 2 + (rnd() * 2 | 0), x: ds.x, y: ds.y, bob: rnd() * 6 });
+  }
+  for (var oi2 = 1; oi2 < world.islands.length; oi2++) {       /* rewards for crossing */
+    var os = freeSpot(rnd, null, 0, world.islands[oi2].id);
+    items.push({ id: nextId++, kind: 'chest', ornate: 1, loot: rollLoot(floor, 1, rnd), x: os.x, y: os.y, bob: rnd() * 6 });
+  }
   for (var qv = 0; qv < 2 + (floor > 2 ? 1 : 0); qv++) {
-    var qs = freeSpot(rnd, hero, floor === 1 ? 5 : 6);
+    var qs = freeSpot(rnd, hero, floor === 1 ? 5 : 6, world.home);
     items.push({ id: nextId++, kind: 'arrows', n: 4 + (rnd() * 6 | 0), x: qs.x, y: qs.y, bob: rnd() * 6 });
   }
   if (rnd() < 0.22 + floor * 0.08) {                          /* rare elemental cache */
-    var es = freeSpot(rnd, hero, 8), ek = ELEKEYS[rnd() * ELEKEYS.length | 0];
+    var es = freeSpot(rnd, hero, 8, world.home), ek = ELEKEYS[rnd() * ELEKEYS.length | 0];
     items.push({ id: nextId++, kind: 'ammo', ele: ek, n: 1 + (rnd() < 0.3 ? 1 : 0), x: es.x, y: es.y, bob: rnd() * 6 });
   }
   for (var gi = 0; gi < SLOTKEYS.length; gi++) {
     var slot = SLOTKEYS[gi];
     var tier = clamp((floor - 1) + (rnd() < 0.35 ? 1 : 0) - (rnd() < 0.2 ? 1 : 0), 0, MATS.length - 1);
-    var gs = freeSpot(rnd, hero, slot === 'bow' && floor === 1 ? 7 : 6);
-    items.push({ id: nextId++, kind: 'gear', slot: slot, tier: tier, x: gs.x, y: gs.y, bob: rnd() * 6 });
+    var gs = freeSpot(rnd, hero, slot === 'bow' && floor === 1 ? 7 : 6, world.home);
+    items.push({ id: nextId++, kind: 'gear', slot: slot, tier: tier, affix: affixFor(slot, rnd, 0.2), x: gs.x, y: gs.y, bob: rnd() * 6 });
   }
   run.floorStart = tick;
   say('floor ' + floor + ' — ' + FLOORDEF[clamp(floor - 1, 0, 4)].name);
@@ -353,7 +444,18 @@ function theBoss() { for (var i = 0; i < mobs.length; i++) if (mobs[i].boss) ret
 
 /* ---------------- pathfinding ---------------- */
 var visit = new Int32Array(W * H), prevB = new Int32Array(W * H), bq = new Int32Array(W * H), st4 = 0;
-function stepToward(sx, sy, tx, ty, budget, avoid) {
+function landPass(x, y) { return walkable(x, y) && !occupied(x, y); }
+function heroPass(x, y) {
+  if (occupied(x, y)) return false;
+  return walkable(x, y) || (hero.boat && tileAt(x, y) <= WATER);
+}
+function isShore(x, y) {
+  if (!walkable(x, y)) return false;
+  for (var d = 0; d < 4; d++) if (tileAt(x + DX[d], y + DY[d]) <= WATER) return true;
+  return false;
+}
+function stepToward(sx, sy, tx, ty, budget, avoid, pass) {
+  pass = pass || landPass;
   if (sx === tx && sy === ty) return null;
   st4++;
   var start = sy * W + sx, goal = ty * W + tx, qh = 0, qt = 0, n = 0, found = false;
@@ -367,7 +469,7 @@ function stepToward(sx, sy, tx, ty, budget, avoid) {
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
       var ni = ny * W + nx;
       if (visit[ni] === st4) continue;
-      if (ni !== goal && (!walkable(nx, ny) || occupied(nx, ny))) continue;
+      if (ni !== goal && !pass(nx, ny)) continue;
       if (avoid && ni !== goal && Math.abs(nx - avoid.x) + Math.abs(ny - avoid.y) <= avoid.r) continue;
       visit[ni] = st4; prevB[ni] = cur; bq[qt++] = ni;
     }
@@ -455,7 +557,14 @@ function progress() { hero.lastProgress = tick; }
 function heroAttack(mob) {
   hero.face = mob.x > hero.x ? 1 : mob.x < hero.x ? 3 : mob.y > hero.y ? 2 : 0;
   hero.swing = 1; progress();
-  damageMob(mob, Math.max(1, hero.atk + (Math.random() * 4 | 0) - mob.def), 1);
+  var dmg = Math.max(1, hero.atk + (Math.random() * 4 | 0) - mob.def);
+  var alive = mob.hp > dmg;
+  damageMob(mob, dmg, 1);
+  if (hero.leech) {
+    var heal = Math.min(hero.max - hero.hp, Math.round(dmg * hero.leech));
+    if (heal > 0) { hero.hp += heal; fl(hero.x, hero.y, '+' + heal, '#d86a8a'); }
+  }
+  if (hero.burn && alive) applyElement('fire', mob.x, mob.y, mob, Math.round(dmg * 0.5), 1);
 }
 
 function damageMob(mob, dmg, byHero) {
@@ -500,10 +609,101 @@ function mobAttack(mob) {
 }
 function tryMove(e, dx, dy) {
   var nx = e.x + dx, ny = e.y + dy;
-  if (!walkable(nx, ny) || occupied(nx, ny)) return false;
+  if (e === hero ? !heroPass(nx, ny) : !landPass(nx, ny)) return false;
   e.x = nx; e.y = ny;
   e.face = dy < 0 ? 0 : dy > 0 ? 2 : dx > 0 ? 1 : 3;
   return true;
+}
+
+/* ---------------- loot ---------------- */
+function rollGear(floor, rnd, rich) {
+  var slot = SLOTKEYS[rnd() * SLOTKEYS.length | 0];
+  var tier = clamp((floor - 1) + (rich ? 1 : 0) + (rnd() < 0.3 ? 1 : 0) - (rnd() < 0.25 ? 1 : 0), 0, MATS.length - 1);
+  return { slot: slot, tier: tier, affix: affixFor(slot, rnd, rich ? 0.55 : 0.22) };
+}
+function rollLoot(floor, ornate, rnd) {
+  var out = [], rolls = ornate ? 3 + (rnd() < 0.4 ? 1 : 0) : 1 + (rnd() < 0.45 ? 1 : 0);
+  for (var i = 0; i < rolls; i++) {
+    var r = rnd();
+    if (r < 0.26) out.push({ kind: 'gold', n: 18 + (rnd() * 34 | 0) + floor * 9 });
+    else if (r < 0.44) out.push({ kind: 'potion', n: 1 });
+    else if (r < 0.60) out.push({ kind: 'arrows', n: 5 + (rnd() * 8 | 0) });
+    else if (r < 0.68) out.push({ kind: 'wood', n: 2 + (rnd() * 3 | 0) });
+    else if (r < 0.90) { var g = rollGear(floor, rnd, ornate); g.kind = 'gear'; out.push(g); }
+    else out.push({ kind: 'ammo', ele: ELEKEYS[rnd() * ELEKEYS.length | 0], n: 1 });
+  }
+  if (ornate && !out.some(function (o) { return o.kind === 'gear'; })) {
+    var g2 = rollGear(floor, rnd, 1); g2.kind = 'gear'; out.push(g2);
+  }
+  return out;
+}
+/* opening one: take what is better, leave the rest on the ground */
+function openChest(it) {
+  var got = [];
+  for (var i = 0; i < it.loot.length; i++) {
+    var L = it.loot[i];
+    if (L.kind === 'gold') { hero.gold += L.n; got.push(L.n + 'g'); }
+    else if (L.kind === 'potion') { if (hero.potions < 4) { hero.potions++; got.push('potion'); } }
+    else if (L.kind === 'arrows') { hero.arrows = Math.min(QUIVER_MAX, hero.arrows + L.n); got.push(L.n + ' arrows'); }
+    else if (L.kind === 'wood') { hero.wood += L.n; got.push(L.n + ' wood'); }
+    else if (L.kind === 'ammo') { hero.ammo[L.ele] += L.n; got.push(L.ele + ' arrow'); }
+    else if (L.kind === 'gear') {
+      if (gearScore(L.slot, L.tier, L.affix) > 0) {
+        hero.gear[L.slot] = L.tier; hero.affix[L.slot] = L.affix || null; recalc(hero);
+        got.push(gearName(L.slot, L.tier, L.affix));
+      } else {
+        items.push({ id: nextId++, kind: 'gear', slot: L.slot, tier: L.tier, affix: L.affix, x: hero.x, y: hero.y, bob: Math.random() * 6 });
+      }
+    }
+  }
+  say((it.ornate ? '★ ornate chest: ' : 'chest: ') + got.join(', ').slice(0, 24));
+  fl(hero.x, hero.y, it.ornate ? 'ORNATE!' : 'loot', it.ornate ? '#ffe9a8' : '#ffd166');
+  progress();
+}
+
+/* ---------------- woodcraft ---------------- */
+function nearestTree(maxR) {
+  var best = null, bd = 1e9;
+  for (var i = 0; i < world.trees.length; i++) {
+    var c = world.trees[i], x = c % W, y = (c - x) / W;
+    if (tileAt(x, y) !== TREE) continue;
+    var d = Math.abs(x - hero.x) + Math.abs(y - hero.y);
+    if (d < bd && d <= maxR && islandAt(x + 1, y) === islandAt(hero.x, hero.y) ||
+        d < bd && d <= maxR && islandAt(x - 1, y) === islandAt(hero.x, hero.y)) { bd = d; best = { x: x, y: y }; }
+  }
+  return best;
+}
+function nearestShore() {
+  var best = null, bd = 1e9, isl = islandTiles(islandAt(hero.x, hero.y));
+  for (var i = 0; i < isl.length; i++) {
+    var c = isl[i], x = c % W, y = (c - x) / W;
+    if (!isShore(x, y)) continue;
+    var d = Math.abs(x - hero.x) + Math.abs(y - hero.y);
+    if (d < bd) { bd = d; best = { x: x, y: y }; }
+  }
+  return best;
+}
+function chopTurn(t) {
+  if (!hero.chop || hero.chop.x !== t.x || hero.chop.y !== t.y)
+    hero.chop = { x: t.x, y: t.y, left: SLOTS.axe.chop[hero.gear.axe] };
+  hero.chop.left--; hero.swing = 1; progress();
+  hero.face = t.x > hero.x ? 1 : t.x < hero.x ? 3 : t.y > hero.y ? 2 : 0;
+  fl(t.x, t.y, 'chop', '#d9b487');
+  if (hero.chop.left > 0) return;
+  world.tiles[t.y * W + t.x] = GRASS;
+  var got = 2 + (Math.random() < 0.4 ? 1 : 0);
+  hero.wood += got; hero.chop = null;
+  fl(t.x, t.y, '+' + got + ' wood', '#d9b487');
+  say('fells a tree (+' + got + ' wood)');
+}
+function buildTurn(spot) {
+  if (!hero.build || hero.build.x !== spot.x || hero.build.y !== spot.y)
+    hero.build = { x: spot.x, y: spot.y, left: BOAT_TURNS };
+  hero.build.left--; progress();
+  fl(hero.x, hero.y, 'build', '#d9b487');
+  if (hero.build.left > 0) return;
+  hero.wood -= BOAT_WOOD; hero.boat = 1; hero.build = null;
+  say('launches a boat'); fl(hero.x, hero.y, 'BOAT', '#9fd8e6'); stats.boats++;
 }
 
 /* ---------------- hero brain ---------------- */
@@ -526,9 +726,9 @@ function nearestOf(list, ok) {
   }
   return best ? { o: best, d: bd } : null;
 }
-function gearScore(slot, tier) {
-  var cur = hero.gear[slot];
-  return tier > cur ? tier - cur : -1;
+function gearScore(slot, tier, affix) {
+  var have = hero.gear[slot] < 0 ? -10 : hero.gear[slot] * 10 + affixWorth(hero.affix[slot]);
+  return (tier * 10 + affixWorth(affix)) - have;
 }
 function readyForBoss(boss) {
   if (!boss || hero.hp < hero.max * 0.7) return false;
@@ -547,7 +747,7 @@ function threatNear(range) {
 function safeSpot(minD) {
   var b = theBoss(), ready = b && readyForBoss(b);
   for (var i = 0; i < 24; i++) {
-    var c = freeSpot(Math.random, hero, minD);
+    var c = freeSpot(Math.random, hero, minD, islandAt(hero.x, hero.y));
     if (!b || ready || Math.abs(c.x - b.x) + Math.abs(c.y - b.y) > 14) return c;
   }
   return freeSpot(Math.random, hero, minD);
@@ -559,6 +759,30 @@ function fleeSpot(from) {
     if (d > bd) { bd = d; best = c; }
   }
   return best;
+}
+
+/* anything worth crossing water for */
+function offIsland(o) {
+  var oi = islandAt(o.x, o.y);
+  return oi >= 0 && oi !== islandAt(hero.x, hero.y);
+}
+function boatPlan() {
+  if (hero.boat) return null;
+  if (hero.gear.axe < 0) {
+    var axe = nearestOf(items, function (o) { return o.kind === 'gear' && o.slot === 'axe'; });
+    if (axe) return { kind: 'item', o: axe.o, why: 'seeking an axe' };
+    var drift = nearestOf(items, function (o) { return o.kind === 'wood'; });
+    if (drift) return { kind: 'item', o: drift.o, why: 'gathering driftwood' };
+    return null;
+  }
+  if (hero.wood < BOAT_WOOD) {
+    var t = nearestTree(40);
+    if (t) return { kind: 'tree', o: t, why: 'felling trees ' + hero.wood + '/' + BOAT_WOOD };
+    return null;
+  }
+  var sh = nearestShore();
+  if (sh) return { kind: 'shore', o: sh, why: 'building a boat' };
+  return null;
 }
 
 function chooseTarget() {
@@ -587,25 +811,31 @@ function chooseTarget() {
   var lk = null;
   var boss = theBoss();
   var keepAway = boss && !readyForBoss(boss) ? boss : null;
-  var far = function (o) { return !keepAway || dist(keepAway, o) > 8; };
+  var reach = function (o) { return hero.boat || !offIsland(o); };
+  var far0 = function (o) { return !keepAway || dist(keepAway, o) > 8; };
+  var far = function (o) { return far0(o) && reach(o); };
   var potion = nearestOf(items, function (o) { return o.kind === 'potion' && far(o); });
-  var gear = nearestOf(items, function (o) { return o.kind === 'gear' && gearScore(o.slot, o.tier) > 0 && far(o); });
+  var gear = nearestOf(items, function (o) { return o.kind === 'gear' && gearScore(o.slot, o.tier, o.affix) > 0 && far(o); });
   var quiver = nearestOf(items, function (o) { return o.kind === 'arrows' && far(o); });
   var rare = nearestOf(items, function (o) { return o.kind === 'ammo'; });
   var mob = nearestOf(mobs, function (o) { return !o.boss && far(o); });
   var chest = nearestOf(items, function (o) { return o.kind === 'chest' && far(o); });
 
   if (hero.hp < hero.max * 0.5 && potion && potion.d < 30) lk = { kind: 'item', o: potion.o, why: 'wounded — potion' };
-  else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + matsFor(gear.o.slot)[gear.o.tier].n + ' ' + SLOTS[gear.o.slot].label };
+  else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + gearName(gear.o.slot, gear.o.tier, gear.o.affix) };
   else if (rare && rare.d < 34) lk = { kind: 'item', o: rare.o, why: 'after a ' + rare.o.ele + ' arrow' };
   else if (quiver && quiver.d < 22 && hero.gear.bow >= 0 && hero.arrows < 8) lk = { kind: 'item', o: quiver.o, why: 'restocking arrows' };
+  else if (boss && !reach(boss) && readyForBoss(boss) && boatPlan()) lk = boatPlan();
   else if (boss && !banned(boss.id) && readyForBoss(boss)) lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
   else if (mob && mob.d <= 18) lk = { kind: 'mob', o: mob.o, why: 'hunting a ' + mob.o.name };
   else if (chest) lk = { kind: 'item', o: chest.o, why: 'looting a chest' };
   else if (potion) lk = { kind: 'item', o: potion.o, why: 'fetching a potion' };
   else if (mob) lk = { kind: 'mob', o: mob.o, why: 'tracking a ' + mob.o.name };
-  else if (boss && !banned(boss.id)) lk = { kind: 'mob', o: boss, why: 'seeking ' + (boss.sname || boss.n) };
-  else { lk = { kind: 'spot', o: safeSpot(14), why: 'exploring' }; }
+  else if (boss && !banned(boss.id) && reach(boss)) lk = { kind: 'mob', o: boss, why: 'seeking ' + (boss.sname || boss.n) };
+  else {
+    var plan = boatPlan();                                    /* nothing left here — put to sea */
+    lk = plan || { kind: 'spot', o: safeSpot(14), why: 'exploring' };
+  }
 
   hero.lock = lk;
   hero.lockT = lk.kind === 'spot' ? 60 : 45;                  /* commit */
@@ -638,6 +868,7 @@ function heroShot(target) {
   hero.shoot = 1; stats.shots++; progress();
   hero.face = Math.abs(target.x - hero.x) > Math.abs(target.y - hero.y)
     ? (target.x > hero.x ? 1 : 3) : (target.y > hero.y ? 2 : 0);
+  if (!ele && hero.burn && Math.random() < 0.35) ele = 'fire';  /* a burning bow catches now and then */
   var M = BOWMATS[hero.gear.bow], E = ele ? ELEMENTS[ele] : null;
   fireShot(hero, target, {
     range: hero.rng, dmg: Math.round((hero.rpow + 2 + (Math.random() * 4 | 0)) * (ele ? 1.5 : 1)),
@@ -668,49 +899,55 @@ function heroTurn() {
     hero.hp += heal; fl(hero.x, hero.y, '+' + heal, '#8ef2a0'); say('quaffs a potion (+' + heal + ')');
     hero.intent = 'drinking a potion'; progress(); return;
   }
+  if (tg.kind === 'tree') {
+    if (dist(hero, tg.o) <= 1) { chopTurn(tg.o); return; }
+  }
+  if (tg.kind === 'shore') {
+    if (hero.x === tg.o.x && hero.y === tg.o.y) { buildTurn(tg.o); return; }
+  }
   if (tg.kind === 'mob') {
     if (dist(hero, tg.o) <= 1) { heroAttack(tg.o); return; }
     if (heroShot(tg.o)) { hero.intent = 'loosing at ' + (tg.o.sname || tg.o.name); return; }
   }
   var bs2 = theBoss(), avoid = null;
   if (bs2 && !readyForBoss(bs2) && !(tg.kind === 'mob' && tg.o === bs2)) avoid = { x: bs2.x, y: bs2.y, r: 9 };
-  var st = stepToward(hero.x, hero.y, tg.o.x, tg.o.y, 12000, avoid);
+  var st = stepToward(hero.x, hero.y, tg.o.x, tg.o.y, 26000, avoid, heroPass);
   if (!st && avoid && tg.kind !== 'spot') { if (tg.o.id) hero.ban[tg.o.id] = tick + 50; hero.lock = null; hero.lockT = 0; return; }
   if (!st) {
     if (tg.o.id) hero.ban[tg.o.id] = tick + 60;
     hero.lock = null; hero.lockT = 0; return;
   }
   if (tg.kind === 'mob' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { heroAttack(tg.o); return; }
+  if (tg.kind === 'tree' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { chopTurn(tg.o); return; }
   if (!tryMove(hero, st.x, st.y)) { hero.lockT = Math.min(hero.lockT, 3); return; }
+  hero.sailing = hero.boat && tileAt(hero.x, hero.y) <= WATER ? 1 : 0;
 
   for (var i = items.length - 1; i >= 0; i--) {
     var it = items[i];
     if (it.x !== hero.x || it.y !== hero.y) continue;
     if (it.kind === 'potion') {
-      if (hero.potions >= 3) continue;
+      if (hero.potions >= 4) continue;
       items.splice(i, 1); hero.potions++; fl(hero.x, hero.y, 'potion', '#8ef2a0'); say('pockets a potion'); progress();
     } else if (it.kind === 'chest') {
       items.splice(i, 1);
-      var g = 15 + (Math.random() * 22 | 0) + run.floor * 8;
-      hero.gold += g; fl(hero.x, hero.y, '+' + g + 'g', '#ffe9a8'); say('opens a chest (+' + g + 'g)'); progress();
-      if (Math.random() < 0.12) {
-        var ck = ELEKEYS[Math.random() * ELEKEYS.length | 0];
-        hero.ammo[ck]++; fl(hero.x, hero.y, ck + ' arrow!', ELEMENTS[ck].edge); say('★ a ' + ck + ' arrow!');
-      }
+      openChest(it);
     } else if (it.kind === 'arrows') {
       if (hero.arrows >= QUIVER_MAX) continue;
       items.splice(i, 1);
       var got = Math.min(it.n, QUIVER_MAX - hero.arrows); hero.arrows += got;
       fl(hero.x, hero.y, '+' + got + ' arrows', '#e8d9a8'); say('gathers ' + got + ' arrows'); progress();
+    } else if (it.kind === 'wood') {
+      items.splice(i, 1); hero.wood += it.n;
+      fl(hero.x, hero.y, '+' + it.n + ' wood', '#d9b487'); say('gathers driftwood (+' + it.n + ')'); progress();
     } else if (it.kind === 'ammo') {
       items.splice(i, 1); hero.ammo[it.ele] += it.n;
       fl(hero.x, hero.y, it.ele + ' arrow!', ELEMENTS[it.ele].edge);
       say('★ finds ' + it.n + ' ' + it.ele + ' arrow' + (it.n > 1 ? 's' : '')); progress();
     } else if (it.kind === 'gear') {
-      if (gearScore(it.slot, it.tier) <= 0) continue;
+      if (gearScore(it.slot, it.tier, it.affix) <= 0) continue;
       items.splice(i, 1);
-      hero.gear[it.slot] = it.tier; recalc(hero);
-      var nm = matsFor(it.slot)[it.tier].n + ' ' + SLOTS[it.slot].label;
+      hero.gear[it.slot] = it.tier; hero.affix[it.slot] = it.affix || null; recalc(hero);
+      var nm = gearName(it.slot, it.tier, it.affix);
       fl(hero.x, hero.y, nm, MATS[it.tier].edge); say('equips ' + nm); progress();
     }
   }
@@ -731,7 +968,7 @@ function spawnMinion(near) {
   }
 }
 function spawnWanderer() {
-  var rnd = Math.random, spot = freeSpot(rnd, hero, 18), floor = run.floor;
+  var rnd = Math.random, spot = freeSpot(rnd, hero, 18, islandAt(hero.x, hero.y)), floor = run.floor;
   var pool = [0, 1, 2, 3, 4, 5], T = MTYPES[pool[clamp((rnd() * 4 | 0) + (floor > 2 ? 2 : 0), 0, 5)]];
   var sc = 1 + 0.45 * (floor - 1);
   mobs.push({ id: nextId++, t: T, boss: 0, name: T.k, x: spot.x, y: spot.y, px: spot.x, py: spot.y,
@@ -815,7 +1052,7 @@ function doTurn() {
     if (phase.name === 'cleared') {
       run.floor++;
       hero.hp = Math.min(hero.max, hero.hp + Math.round(hero.max * 0.45));
-      hero.potions = Math.min(3, hero.potions + 1);
+      hero.potions = Math.min(4, hero.potions + 1);
       buildFloor(run.floor); setPhase('play', 0);
     } else if (phase.name === 'died' || phase.name === 'victory') {
       setPhase('title', 3200);
@@ -865,13 +1102,23 @@ function spaced(txt, cx, y, size, sp, col, font) {
 }
 
 function drawHero(sx, sy) {
-  var y = sy + Math.sin(performance.now() / 260) * 0.8;
+  var sail = hero.sailing && tileAt(hero.x, hero.y) <= WATER;
+  var y = sy + Math.sin(performance.now() / 260) * 0.8 + (sail ? Math.sin(performance.now() / 400) * 1.2 - 3 : 0);
   ctx.fillStyle = 'rgba(0,0,0,.28)';
   ctx.beginPath(); ctx.ellipse(sx + 12, sy + 21, 8, 3.5, 0, 0, 6.2832); ctx.fill();
+  if (sail) {
+    var by = sy + 16 + Math.sin(performance.now() / 400) * 1.2;
+    ctx.fillStyle = 'rgba(255,255,255,.30)';
+    ctx.beginPath(); ctx.ellipse(sx + 12, by + 5, 13, 3.5, 0, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#6b4a2a';
+    ctx.beginPath(); ctx.moveTo(sx - 1, by); ctx.lineTo(sx + 25, by);
+    ctx.lineTo(sx + 20, by + 7); ctx.lineTo(sx + 4, by + 7); ctx.fill();
+    rect(ctx, sx - 1, by, 26, 2, '#9c7440');
+  }
   var arm = hero.gear.armor, tunic = hero.hurt > 0 ? '#ff9d9d' : (arm >= 0 ? MATS[arm].col : '#3a6fd8');
   rect(ctx, sx + 7, y + 10, 10, 9, tunic);
   if (arm >= 0) { rect(ctx, sx + 7, y + 10, 10, 2, MATS[arm].edge); rect(ctx, sx + 11, y + 12, 2, 6, MATS[arm].edge); }
-  rect(ctx, sx + 7, y + 19, 3, 3, '#2b2b38'); rect(ctx, sx + 14, y + 19, 3, 3, '#2b2b38');
+  if (!sail) { rect(ctx, sx + 7, y + 19, 3, 3, '#2b2b38'); rect(ctx, sx + 14, y + 19, 3, 3, '#2b2b38'); }
   rect(ctx, sx + 7, y + 3, 10, 8, '#f0c39a');
   rect(ctx, sx + 6, y + 2, 12, 3, '#6a3f22');
   if (hero.face === 2) { rect(ctx, sx + 9, y + 7, 2, 2, '#22222c'); rect(ctx, sx + 13, y + 7, 2, 2, '#22222c'); }
@@ -1073,8 +1320,18 @@ function drawItem(it, sx, sy) {
   ctx.fillStyle = 'rgba(0,0,0,.25)';
   ctx.beginPath(); ctx.ellipse(sx + 12, sy + 20, 6, 2.5, 0, 0, 6.2832); ctx.fill();
   if (it.kind === 'chest') {
+    if (it.ornate) {
+      ctx.globalAlpha = 0.30 + 0.20 * Math.abs(Math.sin(performance.now() / 380 + it.bob));
+      ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(sx + 12, sy + 13, 13, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 1;
+      rect(ctx, sx + 2, sy + 9, 20, 12, '#7a4a22'); rect(ctx, sx + 2, sy + 5, 20, 5, '#9c5f2c');
+      rect(ctx, sx + 2, sy + 13, 20, 2, '#ffd166'); rect(ctx, sx + 2, sy + 9, 20, 1, '#ffe9a8');
+      rect(ctx, sx + 10, sy + 11, 4, 5, '#fff4c2');
+      rect(ctx, sx + 2, sy + 5, 2, 16, '#ffd166'); rect(ctx, sx + 20, sy + 5, 2, 16, '#ffd166');
+    } else {
     rect(ctx, sx + 4, sy + 10, 16, 10, '#8a5a2b'); rect(ctx, sx + 4, sy + 7, 16, 4, '#a86e35');
     rect(ctx, sx + 4, sy + 13, 16, 2, '#d9b45c'); rect(ctx, sx + 11, sy + 12, 3, 4, '#ffe9a8');
+    }
   } else if (it.kind === 'arrows') {
     var ab = sy + bob;
     rect(ctx, sx + 7, ab + 9, 9, 11, '#6b4a2a'); rect(ctx, sx + 7, ab + 9, 9, 2, '#8a6238');
@@ -1091,13 +1348,18 @@ function drawItem(it, sx, sy) {
       rect(ctx, sx + 9 + ea * 5, eb + 5, 1, 12, '#c9b48a');
       rect(ctx, sx + 8 + ea * 5, eb + 3, 3, 3, E2.edge);
     }
+  } else if (it.kind === 'wood') {
+    var wb = sy + bob;
+    rect(ctx, sx + 4, wb + 12, 16, 4, '#8a6238'); rect(ctx, sx + 4, wb + 12, 16, 1, '#b78a54');
+    rect(ctx, sx + 6, wb + 16, 14, 4, '#6b4a2a'); rect(ctx, sx + 6, wb + 16, 14, 1, '#9c7440');
+    rect(ctx, sx + 5, wb + 13, 2, 2, '#c9a06a'); rect(ctx, sx + 17, wb + 17, 2, 2, '#c9a06a');
   } else if (it.kind === 'potion') {
     rect(ctx, sx + 9, sy + 6 + bob, 6, 3, '#cfd6e4'); rect(ctx, sx + 8, sy + 9 + bob, 8, 9, '#ff5c7a');
     rect(ctx, sx + 10, sy + 11 + bob, 2, 4, 'rgba(255,255,255,.55)');
   } else {
     var M = matsFor(it.slot)[it.tier], yb = sy + bob;
     ctx.globalAlpha = 0.5 + 0.3 * Math.abs(Math.sin(performance.now() / 400 + it.bob));
-    ctx.fillStyle = M.edge; ctx.beginPath(); ctx.arc(sx + 12, yb + 12, 9, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = it.affix ? AFFIX[it.affix].col : M.edge; ctx.beginPath(); ctx.arc(sx + 12, yb + 12, 9, 0, 6.2832); ctx.fill();
     ctx.globalAlpha = 1;
     if (it.slot === 'sword') {
       rect(ctx, sx + 11, yb + 3, 3, 13, M.col); rect(ctx, sx + 11, yb + 3, 3, 3, M.edge);
@@ -1105,6 +1367,10 @@ function drawItem(it, sx, sy) {
     } else if (it.slot === 'shield') {
       rect(ctx, sx + 7, yb + 5, 11, 10, M.col); rect(ctx, sx + 9, yb + 15, 7, 3, M.col);
       rect(ctx, sx + 7, yb + 5, 11, 2, M.edge); rect(ctx, sx + 11, yb + 8, 3, 5, M.edge);
+    } else if (it.slot === 'axe') {
+      rect(ctx, sx + 11, yb + 4, 2, 16, '#6b4a2a');
+      rect(ctx, sx + 6, yb + 4, 7, 6, M.col); rect(ctx, sx + 6, yb + 4, 7, 2, M.edge);
+      rect(ctx, sx + 13, yb + 5, 3, 4, M.col);
     } else if (it.slot === 'bow') {
       ctx.strokeStyle = M.col; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(sx + 15, yb + 12, 8, 2.1, 4.2); ctx.stroke();
@@ -1142,6 +1408,7 @@ function drawHUD() {
   ctx.fillText('LUNCHQUEST', X + 14, 12);
   ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = '#7f8ca3';
   ctx.fillText('run ' + run.n + ' · floor ' + run.floor + '/' + FLOORS, X + 14, 30);
+  ctx.fillText('seed ' + run.seed.toString(16), X + 150, 30);
   ctx.fillStyle = '#5f6b80';
   ctx.fillText(FLOORDEF[clamp(run.floor - 1, 0, 4)].name, X + 14, 42);
 
@@ -1164,34 +1431,45 @@ function drawHUD() {
   for (var s = 0; s < SLOTKEYS.length; s++) {                 /* gear panel */
     var k = SLOTKEYS[s], tr = hero.gear[k];
     ctx.fillStyle = '#6e7b91'; ctx.fillText(SLOTS[k].label, X + 14, y);
-    if (tr < 0) { ctx.fillStyle = '#3f4859'; ctx.fillText('—', X + 76, y); }
-    else {
-      var MM = matsFor(k)[tr];
-      ctx.fillStyle = MM.edge; rect(ctx, X + 76, y + 2, 6, 6, MM.col);
-      ctx.fillText(MM.n, X + 88, y);
-      if (k === 'bow') { ctx.fillStyle = hero.arrows > 0 ? '#e8d9a8' : '#8a4a4a'; ctx.fillText('\u00d7' + hero.arrows, X + 176, y); }
+    if (tr < 0) {
+      ctx.fillStyle = '#3f4859'; ctx.fillText('—', X + 76, y);
+      if (k === 'axe' && hero.wood) { ctx.fillStyle = '#d9b487'; ctx.fillText('\u00d7' + hero.wood, X + 186, y); }
     }
-    y += 15;
+    else {
+      var MM = matsFor(k)[tr], AF = hero.affix[k];
+      rect(ctx, X + 76, y + 2, 6, 6, AF ? AFFIX[AF].col : MM.col);
+      ctx.fillStyle = AF ? AFFIX[AF].col : MM.edge;
+      ctx.fillText(((AF ? AF.slice(0, 4) + ' ' : '') + MM.n).slice(0, 14), X + 88, y);
+      if (k === 'bow') { ctx.fillStyle = hero.arrows > 0 ? '#e8d9a8' : '#8a4a4a'; ctx.fillText('\u00d7' + hero.arrows, X + 186, y); }
+      if (k === 'axe') { ctx.fillStyle = '#d9b487'; ctx.fillText('\u00d7' + hero.wood, X + 186, y); }
+    }
+    y += 14;
   }
   var pips = 0;
+  if (hero.boat) {
+    rect(ctx, X + 14, y + 2, 8, 5, '#9c7440');
+    ctx.fillStyle = '#9fd8e6'; ctx.fillText('sail', X + 26, y);
+    pips++;
+  }
   for (var e2 = 0; e2 < ELEKEYS.length; e2++) {
     var ek2 = ELEKEYS[e2], cnt = hero.ammo[ek2];
     if (!cnt) continue;
-    var px4 = X + 14 + pips * 74;
+    var px4 = X + 14 + pips * 44;
     rect(ctx, px4, y + 2, 6, 6, ELEMENTS[ek2].col);
-    ctx.fillStyle = ELEMENTS[ek2].edge; ctx.fillText(ek2 + '\u00d7' + cnt, px4 + 10, y);
+    ctx.fillStyle = ELEMENTS[ek2].edge; ctx.fillText(ek2.slice(0, 3) + '\u00d7' + cnt, px4 + 10, y);
     pips++;
   }
   y += pips ? 17 : 4;
 
-  var ms = PW - 60, mx = X + 30;
+  var ms = PW - 74, mx = X + 37;
   ctx.fillStyle = '#000'; ctx.fillRect(mx - 1, y - 1, ms + 2, ms + 2);
   ctx.drawImage(world.mini, mx, y, ms, ms);
   var sc = ms / W, k2;
   for (k2 = 0; k2 < items.length; k2++) {
     var it = items[k2];
-    ctx.fillStyle = it.kind === 'chest' ? '#ffd166' : it.kind === 'potion' ? '#8ef2a0'
-      : it.kind === 'arrows' ? '#e8d9a8' : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : matsFor(it.slot)[it.tier].edge;
+    ctx.fillStyle = it.kind === 'chest' ? (it.ornate ? '#fff4c2' : '#ffd166') : it.kind === 'potion' ? '#8ef2a0'
+      : it.kind === 'arrows' ? '#e8d9a8' : it.kind === 'wood' ? '#d9b487'
+      : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : matsFor(it.slot)[it.tier].edge;
     ctx.fillRect(mx + it.x * sc, y + it.y * sc, 2, 2);
   }
   for (k2 = 0; k2 < mobs.length; k2++) {
@@ -1228,6 +1506,7 @@ function drawCard() {
     spaced('YOU DIED', VPW / 2, mid, 62, 9, gr);
     rect(ctx, VPW / 2 - 200, mid + 16, 400, 1, 'rgba(180,60,50,.45)');
     spaced('FLOOR ' + run.floor + '  ·  LEVEL ' + hero.lvl + '  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 44, 15, 3, 'rgba(190,180,170,.75)');
+    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 70, 12, 3, 'rgba(150,140,135,.6)');
   } else if (phase.name === 'cleared') {
     var g2 = ctx.createLinearGradient(0, mid - 26, 0, mid + 10);
     g2.addColorStop(0, '#ffeeb0'); g2.addColorStop(1, '#a8842f');
@@ -1241,6 +1520,7 @@ function drawCard() {
     spaced('THE UNDYING IS UNMADE', VPW / 2, mid + 24, 18, 5, 'rgba(240,230,200,.85)');
     rect(ctx, VPW / 2 - 200, mid + 40, 400, 1, 'rgba(200,170,90,.45)');
     spaced('LEVEL ' + hero.lvl + '  ·  ' + hero.kills + ' SLAIN  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 68, 15, 3, 'rgba(220,210,180,.8)');
+    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 94, 12, 3, 'rgba(200,190,160,.6)');
   } else {
     spaced('LUNCHQUEST', VPW / 2, mid - 10, 54, 12, '#dfe6f2');
     spaced('RUN ' + (run.n + 1), VPW / 2, mid + 26, 17, 6, 'rgba(180,190,210,.7)');
@@ -1356,17 +1636,20 @@ function render(dt) {
 /* ---------------- boot ---------------- */
 function boot() {
   buildBaseSheet();
-  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, killers: {} };
+  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, killers: {} };
   log = []; tick = 0; shake = 0; run = null; hero = null;
   mobs = []; items = []; floats = []; shots = []; fx = [];
   setPhase('play', 0);
   say('lunchquest — the hero needs no player');
-  newRun();
+  var sq = typeof location !== 'undefined' ? /seed=([0-9a-f]+)/i.exec(location.search || '') : null;
+  newRun(sq ? parseInt(sq[1], 16) : undefined);
   var q = typeof location !== 'undefined' && location.search ? /card=(\w+)/.exec(location.search) : null;
   if (q) { setPhase(q[1], 100000); phase.t = 42000; }          /* card preview for screenshots */
   if (typeof location !== 'undefined' && /parade/.test(location.search || '')) parade();
   if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
-    hero.gear = { sword: 3, shield: 3, armor: 3, bow: 3 }; recalc(hero); hero.hp = hero.max;
+    hero.gear = { sword: 4, shield: 4, armor: 4, bow: 4, axe: 4 };
+    hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
+    recalc(hero); hero.hp = hero.max;
     hero.arrows = QUIVER_MAX; hero.ammo = { fire: 9, frost: 9, shock: 9 };
   }
   var fq = typeof location !== 'undefined' ? /floor=(\d)/.exec(location.search || '') : null;
