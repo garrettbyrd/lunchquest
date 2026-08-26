@@ -64,12 +64,27 @@ var MATS = [
   { n: 'electrum',   col: '#e0c469', edge: '#fff4c2' },
   { n: 'orichalcum', col: '#4fd6b8', edge: '#d3fff5' }
 ];
+var BOWMATS = [
+  { n: 'ash',        col: '#a8794a', edge: '#d9b487' },
+  { n: 'yew',        col: '#7c9b5a', edge: '#cfe6a8' },
+  { n: 'horn',       col: '#c9bfa0', edge: '#fff2d0' },
+  { n: 'dragonbone', col: '#d8607a', edge: '#ffd0dc' }
+];
 var SLOTS = {
-  sword:  { atk: [4, 8, 13, 20],  label: 'blade'  },
-  shield: { def: [1, 3, 5, 8],    label: 'shield' },
-  armor:  { hp:  [10, 22, 38, 60], label: 'armor' }
+  sword:  { atk: [4, 8, 13, 20],   label: 'blade'  },
+  shield: { def: [1, 3, 5, 8],     label: 'shield' },
+  armor:  { hp:  [10, 22, 38, 60], label: 'armor'  },
+  bow:    { pow: [3, 6, 11, 16], rng: [6, 7, 8, 9], label: 'bow', mats: BOWMATS }
 };
-var SLOTKEYS = ['sword', 'shield', 'armor'];
+var SLOTKEYS = ['sword', 'shield', 'armor', 'bow'];
+var QUIVER_MAX = 24;
+var ELEMENTS = {
+  fire:  { n: 'fire',  col: '#ff8a3d', edge: '#ffd7a8', fx: 'blast' },
+  frost: { n: 'frost', col: '#8fdcff', edge: '#dff4ff', fx: 'freeze' },
+  shock: { n: 'shock', col: '#ffe066', edge: '#fff8c8', fx: 'chain' }
+};
+var ELEKEYS = ['fire', 'frost', 'shock'];
+function matsFor(slot) { return SLOTS[slot].mats || MATS; }
 
 /* ---------------- bosses ---------------- */
 var BOSSES = [
@@ -89,7 +104,9 @@ var LICH = { n: 'Xanthemar, the Undying', s: 'Xanthemar', shape: 'lich', hp: 430
 var MTYPES = [
   { k: 'slime',    hp: 12, atk: 3, def: 0, ev: 2, aggro: 7,  gold: 3,  xp: 5,  col: '#6ad36f', dark: '#2f7a37' },
   { k: 'bat',      hp: 9,  atk: 4, def: 0, ev: 1, aggro: 8, gold: 5,  xp: 7,  col: '#a479d6', dark: '#5c3b85' },
+  { k: 'archer',   hp: 14, atk: 5, def: 0, ev: 2, aggro: 9,  gold: 8,  xp: 11, rng: 5, shot: '#e8d9a8', col: '#d9c9a0', dark: '#7d6f4e' },
   { k: 'skeleton', hp: 20, atk: 6, def: 1, ev: 2, aggro: 7,  gold: 9,  xp: 12, col: '#e8e4d5', dark: '#8b8776' },
+  { k: 'imp',      hp: 16, atk: 6, def: 1, ev: 2, aggro: 9,  gold: 11, xp: 14, rng: 4, shot: '#ff9d4d', col: '#e0763c', dark: '#7a3a18' },
   { k: 'ogre',     hp: 34, atk: 9, def: 2, ev: 3, aggro: 7,  gold: 18, xp: 22, col: '#9a7350', dark: '#5c452e' }
 ];
 
@@ -222,9 +239,9 @@ function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : wor
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
 
 /* ---------------- state ---------------- */
-var hero, mobs, items, floats, bolts, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
+var hero, mobs, items, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
 
-function say(m) { log.push(m); if (log.length > 7) log.shift(); }
+function say(m) { log.push(m); if (log.length > 6) log.shift(); }
 function fl(x, y, txt, col) { floats.push({ x: x, y: y, txt: txt, col: col, t: 0 }); }
 function dist(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
 
@@ -232,8 +249,8 @@ function setPhase(name, dur) { phase = { name: name, t: 0, dur: dur }; }
 
 function newHero() {
   var h = { x: 0, y: 0, px: 0, py: 0, lvl: 1, xp: 0, next: 22, gold: 0, kills: 0, bosses: 0,
-            baseAtk: 5, baseDef: 1, baseMax: 44, potions: 2,
-            gear: { sword: 0, shield: -1, armor: -1 },
+            baseAtk: 5, baseDef: 1, baseMax: 44, potions: 2, arrows: 0, ammo: { fire: 0, frost: 0, shock: 0 },
+            gear: { sword: 0, shield: -1, armor: -1, bow: -1 },
             face: 2, swing: 0, hurt: 0, intent: 'descending', lock: null, lockT: 0,
             hist: [], lastProgress: 0, ban: {} };
   recalc(h); h.hp = h.max; return h;
@@ -242,6 +259,8 @@ function recalc(h) {
   h.atk = h.baseAtk + (h.gear.sword >= 0 ? SLOTS.sword.atk[h.gear.sword] : 0);
   h.def = h.baseDef + (h.gear.shield >= 0 ? SLOTS.shield.def[h.gear.shield] : 0);
   h.max = h.baseMax + (h.gear.armor >= 0 ? SLOTS.armor.hp[h.gear.armor] : 0);
+  h.rpow = h.gear.bow >= 0 ? SLOTS.bow.pow[h.gear.bow] : 0;
+  h.rng = h.gear.bow >= 0 ? SLOTS.bow.rng[h.gear.bow] : 0;
   if (h.hp > h.max) h.hp = h.max;
 }
 function occupied(x, y) {
@@ -277,7 +296,7 @@ function buildFloor(floor) {
   sheet = sheetFor(floor);
   applyRecipe(world.mini, FLOORDEF[clamp(floor - 1, 0, FLOORDEF.length - 1)].recipe);
   var rnd = world.rnd;
-  mobs = []; items = []; floats = []; bolts = [];
+  mobs = []; items = []; floats = []; shots = []; fx = [];
   var spot = freeSpot(rnd, null, 0);
   hero.x = spot.x; hero.y = spot.y; hero.px = spot.x; hero.py = spot.y;
   hero.lock = null; hero.lockT = 0; hero.ban = {}; hero.hist = []; hero.lastProgress = tick;
@@ -285,7 +304,7 @@ function buildFloor(floor) {
   /* rank-and-file */
   var pool = [];
   for (var i = 0; i < MTYPES.length; i++) {
-    var wgt = clamp(4 - Math.abs(i - clamp((floor - 1) * 0.95, 0, 3)) * 1.7, 0, 4) | 0;
+    var wgt = clamp(4 - Math.abs(i - clamp((floor - 1) * 1.2, 0, 5)) * 1.5, 0, 4) | 0;
     for (var j = 0; j < wgt + (i === 0 && floor < 3 ? 1 : 0); j++) pool.push(i);
   }
   if (!pool.length) pool.push(1);
@@ -311,10 +330,18 @@ function buildFloor(floor) {
   /* loot: chests, potions, and gear of a tier that tracks the floor */
   for (var c = 0; c < 4 + (floor % 3); c++) { var cs = freeSpot(rnd, hero, 5); items.push({ id: nextId++, kind: 'chest', x: cs.x, y: cs.y, bob: rnd() * 6 }); }
   for (var p = 0; p < 3 + (floor > 2 ? 1 : 0); p++) { var ps = freeSpot(rnd, hero, 4); items.push({ id: nextId++, kind: 'potion', x: ps.x, y: ps.y, bob: rnd() * 6 }); }
-  for (var gi = 0; gi < 3; gi++) {
-    var slot = SLOTKEYS[gi % 3];
+  for (var qv = 0; qv < 2 + (floor > 2 ? 1 : 0); qv++) {
+    var qs = freeSpot(rnd, hero, floor === 1 ? 5 : 6);
+    items.push({ id: nextId++, kind: 'arrows', n: 4 + (rnd() * 6 | 0), x: qs.x, y: qs.y, bob: rnd() * 6 });
+  }
+  if (rnd() < 0.22 + floor * 0.08) {                          /* rare elemental cache */
+    var es = freeSpot(rnd, hero, 8), ek = ELEKEYS[rnd() * ELEKEYS.length | 0];
+    items.push({ id: nextId++, kind: 'ammo', ele: ek, n: 1 + (rnd() < 0.3 ? 1 : 0), x: es.x, y: es.y, bob: rnd() * 6 });
+  }
+  for (var gi = 0; gi < SLOTKEYS.length; gi++) {
+    var slot = SLOTKEYS[gi];
     var tier = clamp((floor - 1) + (rnd() < 0.35 ? 1 : 0) - (rnd() < 0.2 ? 1 : 0), 0, MATS.length - 1);
-    var gs = freeSpot(rnd, hero, 6);
+    var gs = freeSpot(rnd, hero, slot === 'bow' && floor === 1 ? 7 : 6);
     items.push({ id: nextId++, kind: 'gear', slot: slot, tier: tier, x: gs.x, y: gs.y, bob: rnd() * 6 });
   }
   run.floorStart = tick;
@@ -352,14 +379,88 @@ function stepToward(sx, sy, tx, ty, budget, avoid) {
   return { x: fx - sx, y: fy - sy };
 }
 
+/* ---------------- ranged combat ----------------
+   One model for every arrow and bolt in the game: trace a line, stop at the
+   first wall or body, apply damage there, and draw a tracer along the path. */
+function blocksShot(x, y) { var t = tileAt(x, y); return t === TREE || t === ROCK; }
+function bodyAt(x, y) {
+  if (hero && hero.x === x && hero.y === y) return hero;
+  for (var i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return mobs[i];
+  return null;
+}
+function traceShot(x0, y0, x1, y1, range) {
+  var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  var err = dx + dy, x = x0, y = y0, px = x0, py = y0, steps = 0;
+  while (steps++ < range + 2) {
+    var e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+    if (blocksShot(x, y)) return { x: px, y: py, hit: null };
+    var b = bodyAt(x, y);
+    if (b) return { x: x, y: y, hit: b };
+    if (x === x1 && y === y1) return { x: x, y: y, hit: null };
+    px = x; py = y;
+  }
+  return { x: px, y: py, hit: null };
+}
+function canShoot(from, to, range) {
+  var d = dist(from, to);
+  if (d < 2 || d > range) return false;
+  return traceShot(from.x, from.y, to.x, to.y, range).hit === to;
+}
+function mobsNear(x, y, r, skip) {
+  var out = [];
+  for (var i = 0; i < mobs.length; i++) {
+    if (mobs[i] === skip) continue;
+    if (Math.abs(mobs[i].x - x) + Math.abs(mobs[i].y - y) <= r) out.push(mobs[i]);
+  }
+  return out;
+}
+function applyElement(ele, x, y, hit, dmg, byHero) {
+  var E = ELEMENTS[ele];
+  if (E.fx === 'blast') {
+    fx.push({ kind: 'ring', x: x, y: y, t: 0, col: E.col, r: 2.2 });
+    var caught = mobsNear(x, y, 2, hit);
+    for (var i = 0; i < caught.length; i++) damageMob(caught[i], Math.max(1, Math.round(dmg * 0.7) - caught[i].def), byHero);
+    if (hero && Math.abs(hero.x - x) + Math.abs(hero.y - y) <= 2 && !byHero) hurtHero(Math.max(1, Math.round(dmg * 0.7) - hero.def), null);
+    shake = Math.max(shake, 7);
+    if (byHero && caught.length) say('the blast catches ' + caught.length + ' more');
+  } else if (E.fx === 'freeze') {
+    if (hit && hit !== hero) { hit.frozen = 3; fl(hit.x, hit.y, 'frozen', E.edge); }
+    fx.push({ kind: 'ring', x: x, y: y, t: 0, col: E.col, r: 1.2 });
+  } else if (E.fx === 'chain') {
+    var near = mobsNear(x, y, 5, hit).slice(0, 2), from = { x: x, y: y };
+    for (var c = 0; c < near.length; c++) {
+      fx.push({ kind: 'chain', x0: from.x, y0: from.y, x1: near[c].x, y1: near[c].y, t: 0, col: E.edge });
+      damageMob(near[c], Math.max(1, Math.round(dmg * 0.6) - near[c].def), byHero);
+      from = near[c];
+    }
+    if (byHero && near.length) say('lightning arcs to ' + near.length);
+  }
+}
+function fireShot(from, to, spec) {
+  var r = traceShot(from.x, from.y, to.x, to.y, spec.range);
+  shots.push({ x0: from.x, y0: from.y, x1: r.x, y1: r.y, t: 0, kind: spec.kind, col: spec.col });
+  if (!r.hit) { if (spec.ele && ELEMENTS[spec.ele].fx === 'blast') applyElement(spec.ele, r.x, r.y, null, spec.dmg, spec.byHero); return null; }
+  if (r.hit === hero) hurtHero(Math.max(1, spec.dmg - hero.def), from);
+  else damageMob(r.hit, Math.max(1, spec.dmg - r.hit.def), spec.byHero);
+  if (spec.ele) applyElement(spec.ele, r.x, r.y, r.hit, spec.dmg, spec.byHero);
+  return r.hit;
+}
+
 /* ---------------- combat ---------------- */
 function progress() { hero.lastProgress = tick; }
 
 function heroAttack(mob) {
   hero.face = mob.x > hero.x ? 1 : mob.x < hero.x ? 3 : mob.y > hero.y ? 2 : 0;
   hero.swing = 1; progress();
-  var dmg = Math.max(1, hero.atk + (Math.random() * 4 | 0) - mob.def);
+  damageMob(mob, Math.max(1, hero.atk + (Math.random() * 4 | 0) - mob.def), 1);
+}
+
+function damageMob(mob, dmg, byHero) {
   mob.hp -= dmg; mob.hurt = 1; mob.wake = 1;
+  if (byHero) progress();
   fl(mob.x, mob.y, '-' + dmg, mob.boss ? '#ffb4b4' : '#ffd166');
   if (mob.hp > 0) return;
   mobs.splice(mobs.indexOf(mob), 1);
@@ -370,7 +471,11 @@ function heroAttack(mob) {
     hero.bosses++; stats.bosses++; shake = 9;
     say('★ ' + mob.name + ' falls');
     fl(mob.x, mob.y, 'SLAIN', '#ffe9a8');
-  } else say('slew a ' + mob.name + ' (+' + gold + 'g)');
+  } else {
+    say('slew a ' + mob.name + ' (+' + gold + 'g)');
+    if (mob.t.rng && Math.random() < 0.65 && !bodyAt(mob.x, mob.y))
+      items.push({ id: nextId++, kind: 'arrows', n: 2 + (Math.random() * 4 | 0), x: mob.x, y: mob.y, bob: Math.random() * 6 });
+  }
   while (hero.xp >= hero.next) {
     hero.xp -= hero.next; hero.lvl++; hero.next = Math.round(hero.next * 1.5);
     hero.baseMax += 6; hero.baseAtk += 2; if (hero.lvl % 3 === 0) hero.baseDef++;
@@ -485,11 +590,15 @@ function chooseTarget() {
   var far = function (o) { return !keepAway || dist(keepAway, o) > 8; };
   var potion = nearestOf(items, function (o) { return o.kind === 'potion' && far(o); });
   var gear = nearestOf(items, function (o) { return o.kind === 'gear' && gearScore(o.slot, o.tier) > 0 && far(o); });
+  var quiver = nearestOf(items, function (o) { return o.kind === 'arrows' && far(o); });
+  var rare = nearestOf(items, function (o) { return o.kind === 'ammo'; });
   var mob = nearestOf(mobs, function (o) { return !o.boss && far(o); });
   var chest = nearestOf(items, function (o) { return o.kind === 'chest' && far(o); });
 
   if (hero.hp < hero.max * 0.5 && potion && potion.d < 30) lk = { kind: 'item', o: potion.o, why: 'wounded — potion' };
-  else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + MATS[gear.o.tier].n + ' ' + SLOTS[gear.o.slot].label };
+  else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + matsFor(gear.o.slot)[gear.o.tier].n + ' ' + SLOTS[gear.o.slot].label };
+  else if (rare && rare.d < 34) lk = { kind: 'item', o: rare.o, why: 'after a ' + rare.o.ele + ' arrow' };
+  else if (quiver && quiver.d < 22 && hero.gear.bow >= 0 && hero.arrows < 8) lk = { kind: 'item', o: quiver.o, why: 'restocking arrows' };
   else if (boss && !banned(boss.id) && readyForBoss(boss)) lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
   else if (mob && mob.d <= 18) lk = { kind: 'mob', o: mob.o, why: 'hunting a ' + mob.o.name };
   else if (chest) lk = { kind: 'item', o: chest.o, why: 'looting a chest' };
@@ -509,6 +618,31 @@ function oscillating() {
   var seen = {}, n = 0;
   for (var i = h.length - 16; i < h.length; i++) if (!seen[h[i]]) { seen[h[i]] = 1; n++; }
   return n <= 3;                                             /* ping-ponging over ≤3 tiles */
+}
+
+function pickAmmo(target) {
+  var cluster = mobsNear(target.x, target.y, 2, null).length;
+  if (hero.ammo.fire > 0 && (target.boss || cluster >= 3)) return 'fire';
+  if (hero.ammo.shock > 0 && (target.boss || cluster >= 2)) return 'shock';
+  if (hero.ammo.frost > 0 && (target.boss || hero.hp < hero.max * 0.5)) return 'frost';
+  return null;
+}
+function heroShot(target) {
+  if (hero.gear.bow < 0) return false;
+  var ele = pickAmmo(target);
+  if (!ele && hero.arrows <= 0) return false;
+  if (!ele && !target.boss && hero.arrows <= 2) return false;  /* save the last few */
+  if (!canShoot(hero, target, hero.rng)) return false;
+  if (ele) { hero.ammo[ele]--; stats.specials++; say('looses a ' + ele + ' arrow'); }
+  else hero.arrows--;
+  hero.shoot = 1; stats.shots++; progress();
+  hero.face = Math.abs(target.x - hero.x) > Math.abs(target.y - hero.y)
+    ? (target.x > hero.x ? 1 : 3) : (target.y > hero.y ? 2 : 0);
+  var M = BOWMATS[hero.gear.bow], E = ele ? ELEMENTS[ele] : null;
+  fireShot(hero, target, {
+    range: hero.rng, dmg: Math.round((hero.rpow + 2 + (Math.random() * 4 | 0)) * (ele ? 1.5 : 1)),
+    kind: ele || 'arrow', col: E ? E.edge : M.edge, ele: ele, byHero: 1 });
+  return true;
 }
 
 function heroTurn() {
@@ -536,6 +670,7 @@ function heroTurn() {
   }
   if (tg.kind === 'mob') {
     if (dist(hero, tg.o) <= 1) { heroAttack(tg.o); return; }
+    if (heroShot(tg.o)) { hero.intent = 'loosing at ' + (tg.o.sname || tg.o.name); return; }
   }
   var bs2 = theBoss(), avoid = null;
   if (bs2 && !readyForBoss(bs2) && !(tg.kind === 'mob' && tg.o === bs2)) avoid = { x: bs2.x, y: bs2.y, r: 9 };
@@ -558,11 +693,24 @@ function heroTurn() {
       items.splice(i, 1);
       var g = 15 + (Math.random() * 22 | 0) + run.floor * 8;
       hero.gold += g; fl(hero.x, hero.y, '+' + g + 'g', '#ffe9a8'); say('opens a chest (+' + g + 'g)'); progress();
+      if (Math.random() < 0.12) {
+        var ck = ELEKEYS[Math.random() * ELEKEYS.length | 0];
+        hero.ammo[ck]++; fl(hero.x, hero.y, ck + ' arrow!', ELEMENTS[ck].edge); say('★ a ' + ck + ' arrow!');
+      }
+    } else if (it.kind === 'arrows') {
+      if (hero.arrows >= QUIVER_MAX) continue;
+      items.splice(i, 1);
+      var got = Math.min(it.n, QUIVER_MAX - hero.arrows); hero.arrows += got;
+      fl(hero.x, hero.y, '+' + got + ' arrows', '#e8d9a8'); say('gathers ' + got + ' arrows'); progress();
+    } else if (it.kind === 'ammo') {
+      items.splice(i, 1); hero.ammo[it.ele] += it.n;
+      fl(hero.x, hero.y, it.ele + ' arrow!', ELEMENTS[it.ele].edge);
+      say('★ finds ' + it.n + ' ' + it.ele + ' arrow' + (it.n > 1 ? 's' : '')); progress();
     } else if (it.kind === 'gear') {
       if (gearScore(it.slot, it.tier) <= 0) continue;
       items.splice(i, 1);
       hero.gear[it.slot] = it.tier; recalc(hero);
-      var nm = MATS[it.tier].n + ' ' + SLOTS[it.slot].label;
+      var nm = matsFor(it.slot)[it.tier].n + ' ' + SLOTS[it.slot].label;
       fl(hero.x, hero.y, nm, MATS[it.tier].edge); say('equips ' + nm); progress();
     }
   }
@@ -584,14 +732,13 @@ function spawnMinion(near) {
 }
 function spawnWanderer() {
   var rnd = Math.random, spot = freeSpot(rnd, hero, 18), floor = run.floor;
-  var pool = [0, 1, 1, 2, 2, 3], T = MTYPES[pool[clamp((rnd() * 6 | 0) + (floor > 2 ? 1 : 0), 0, 5)]];
+  var pool = [0, 1, 2, 3, 4, 5], T = MTYPES[pool[clamp((rnd() * 4 | 0) + (floor > 2 ? 2 : 0), 0, 5)]];
   var sc = 1 + 0.45 * (floor - 1);
   mobs.push({ id: nextId++, t: T, boss: 0, name: T.k, x: spot.x, y: spot.y, px: spot.x, py: spot.y,
     hp: Math.round(T.hp * sc), max: Math.round(T.hp * sc),
     atk: T.atk + (floor - 1) * 2, def: T.def + (floor > 2 ? 1 : 0), ev: T.ev,
     face: 2, hurt: 0, swing: 0, wake: 0 });
 }
-function bolt(from, to, col) { bolts.push({ x0: from.x, y0: from.y, x1: to.x, y1: to.y, t: 0, col: col }); }
 
 function mobTurn(m) {
   var d = dist(m, hero);
@@ -600,9 +747,10 @@ function mobTurn(m) {
 
   if (m.boss) {
     m.cd = (m.cd || 0) + 1;
-    if ((m.ab === 'ranged' || m.ab === 'lich') && d >= 2 && d <= 6 && m.cd % 3 === 0) {
-      bolt(m, hero, m.ab === 'lich' ? '#a9f0ff' : '#ff9d4d');
-      hurtHero(Math.max(2, Math.round(m.atk * 0.7) - Math.round(hero.def * 0.4)), m);
+    if ((m.ab === 'ranged' || m.ab === 'lich') && m.cd % (m.ab === 'lich' ? 2 : 3) === 0 && canShoot(m, hero, 10)) {
+      m.swing = 1;
+      fireShot(m, hero, { range: 10, dmg: Math.round(m.atk * 0.9) + (Math.random() * 4 | 0),
+        kind: 'bolt', col: m.ab === 'lich' ? '#a9f0ff' : '#ff9d4d' });
       return;
     }
     if ((m.ab === 'summon' || m.ab === 'lich') && m.cd % (m.ab === 'lich' ? 12 : 16) === 0) { spawnMinion(m); if (m.ab === 'summon') return; }
@@ -619,9 +767,21 @@ function mobTurn(m) {
     }
   }
   if (d <= 1) { mobAttack(m); return; }
+  if (m.t.rng && canShoot(m, hero, m.t.rng)) {
+    m.swing = 1;
+    m.face = Math.abs(hero.x - m.x) > Math.abs(hero.y - m.y) ? (hero.x > m.x ? 1 : 3) : (hero.y > m.y ? 2 : 0);
+    fireShot(m, hero, { range: m.t.rng, dmg: Math.round(m.atk * 0.8) + (Math.random() * 3 | 0), kind: 'arrow', col: m.t.shot });
+    return;
+  }
   if (d > (m.t.aggro || 8) + (m.boss ? 13 : 7)) { m.wake = 0; return; }
   var st = stepToward(m.x, m.y, hero.x, hero.y, m.boss ? 3000 : 900);
-  if (st) tryMove(m, st.x, st.y);
+  if (st) {
+    tryMove(m, st.x, st.y);
+    if (!m.t.rng && d >= 3 && Math.random() < (m.boss ? 0.4 : 0.5)) {   /* charge the archer */
+      var st2 = stepToward(m.x, m.y, hero.x, hero.y, m.boss ? 3000 : 900);
+      if (st2) tryMove(m, st2.x, st2.y);
+    }
+  }
   else if (!tryMove(m, hero.x > m.x ? 1 : hero.x < m.x ? -1 : 0, 0)) tryMove(m, 0, hero.y > m.y ? 1 : -1);
 }
 
@@ -669,6 +829,7 @@ function doTurn() {
   for (var i = mobs.length - 1; i >= 0; i--) {
     var m = mobs[i];
     if (m.hp <= 0) continue;
+    if (m.frozen > 0) { m.frozen--; fl(m.x, m.y, '*', '#8fdcff'); continue; }
     if (tick % m.ev === 0) mobTurn(m);
     if (phase.name !== 'play') return;
   }
@@ -718,6 +879,16 @@ function drawHero(sx, sy) {
   else if (hero.face === 3) rect(ctx, sx + 9, y + 7, 2, 2, '#22222c');
   var sh = hero.gear.shield;
   if (sh >= 0) { rect(ctx, sx + (hero.face === 3 ? 3 : 17), y + 11, 4, 7, MATS[sh].col); rect(ctx, sx + (hero.face === 3 ? 3 : 17), y + 11, 4, 2, MATS[sh].edge); }
+  var bw = hero.gear.bow;
+  if (bw >= 0) {
+    var BM = BOWMATS[bw], side = hero.face === 3 ? -1 : 1, bx = sx + 12 + side * 9;
+    ctx.strokeStyle = hero.shoot > 0 ? BM.edge : BM.col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(bx, y + 13, 7, side > 0 ? -1.1 : 2.0, side > 0 ? 1.1 : 4.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(240,240,225,.75)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx + side * (hero.shoot > 0 ? -2 : 0), y + 7);
+    ctx.lineTo(bx - side * (hero.shoot > 0 ? 4 : 0), y + 19); ctx.stroke();
+    if (hero.shoot > 0) rect(ctx, sx + 12 + side * 2, y + 12, side * 8, 1, '#efe6c8');
+  }
   var sw = hero.gear.sword;
   if (hero.swing > 0) {
     var ax = sx + 12 + DX[hero.face] * 13, ay = y + 13 + DY[hero.face] * 13;
@@ -863,10 +1034,32 @@ function drawMob(m, sx, sy) {
     rect(ctx, sx + 10, sy + 7, 2, 2, '#2a2a30'); rect(ctx, sx + 14, sy + 7, 2, 2, '#2a2a30');
     rect(ctx, sx + 7, sy + 12, 11, 1, t.dark); rect(ctx, sx + 7, sy + 15, 11, 1, t.dark);
     rect(ctx, sx + 17, sy + 8, 2, 12, '#b8bcc6');
+  } else if (t.k === 'archer') {
+    rect(ctx, sx + 8, sy + 10, 9, 10, col); rect(ctx, sx + 8, sy + 3, 9, 8, col);
+    rect(ctx, sx + 8, sy + 10, 9, 2, t.dark);
+    rect(ctx, sx + 10, sy + 6, 2, 2, '#2a2a30'); rect(ctx, sx + 14, sy + 6, 2, 2, '#2a2a30');
+    var bs = m.face === 3 ? -1 : 1, bxx = sx + 12 + bs * 8;
+    ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(bxx, sy + 13, 6, bs > 0 ? -1.1 : 2.0, bs > 0 ? 1.1 : 4.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(240,240,225,.7)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bxx, sy + 8); ctx.lineTo(bxx, sy + 18); ctx.stroke();
+  } else if (t.k === 'imp') {
+    ctx.fillStyle = t.dark;
+    ctx.beginPath(); ctx.moveTo(sx + 12, sy + 11); ctx.lineTo(sx + 2, sy + 5 + wob); ctx.lineTo(sx + 9, sy + 15); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(sx + 12, sy + 11); ctx.lineTo(sx + 22, sy + 5 + wob); ctx.lineTo(sx + 15, sy + 15); ctx.fill();
+    rect(ctx, sx + 8, sy + 10, 9, 9, col);
+    rect(ctx, sx + 8, sy + 4, 9, 7, col);
+    rect(ctx, sx + 7, sy + 1, 2, 4, t.dark); rect(ctx, sx + 16, sy + 1, 2, 4, t.dark);
+    rect(ctx, sx + 9, sy + 6, 3, 2, '#fff2a8'); rect(ctx, sx + 14, sy + 6, 3, 2, '#fff2a8');
+    rect(ctx, sx + 11, sy + 19, 3, 4, t.dark);
   } else {
     rect(ctx, sx + 5, sy + 9, 14, 12, col); rect(ctx, sx + 7, sy + 2, 10, 8, col);
     rect(ctx, sx + 9, sy + 5, 2, 2, '#20140b'); rect(ctx, sx + 14, sy + 5, 2, 2, '#20140b');
     rect(ctx, sx + 9, sy + 8, 6, 1, '#3a2415'); rect(ctx, sx + 18, sy + 6, 4, 14, t.dark);
+  }
+  if (m.frozen > 0) {
+    ctx.globalAlpha = 0.45; rect(ctx, sx + 4, sy + 2, 16, 20, '#8fdcff'); ctx.globalAlpha = 1;
+    rect(ctx, sx + 4, sy + 2, 16, 1, '#dff4ff'); rect(ctx, sx + 4, sy + 21, 16, 1, '#dff4ff');
   }
   if (m.hp < m.max) {
     rect(ctx, sx + 3, sy - 3, 18, 3, 'rgba(0,0,0,.55)');
@@ -882,11 +1075,27 @@ function drawItem(it, sx, sy) {
   if (it.kind === 'chest') {
     rect(ctx, sx + 4, sy + 10, 16, 10, '#8a5a2b'); rect(ctx, sx + 4, sy + 7, 16, 4, '#a86e35');
     rect(ctx, sx + 4, sy + 13, 16, 2, '#d9b45c'); rect(ctx, sx + 11, sy + 12, 3, 4, '#ffe9a8');
+  } else if (it.kind === 'arrows') {
+    var ab = sy + bob;
+    rect(ctx, sx + 7, ab + 9, 9, 11, '#6b4a2a'); rect(ctx, sx + 7, ab + 9, 9, 2, '#8a6238');
+    for (var q = 0; q < 3; q++) {
+      rect(ctx, sx + 8 + q * 3, ab + 3, 1, 7, '#c9b48a');
+      rect(ctx, sx + 7 + q * 3, ab + 2, 3, 2, '#e8e2d2');
+    }
+  } else if (it.kind === 'ammo') {
+    var E2 = ELEMENTS[it.ele], eb = sy + bob;
+    ctx.globalAlpha = 0.45 + 0.35 * Math.abs(Math.sin(performance.now() / 300 + it.bob));
+    ctx.fillStyle = E2.col; ctx.beginPath(); ctx.arc(sx + 12, eb + 12, 10, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 1;
+    for (var ea = 0; ea < 2; ea++) {
+      rect(ctx, sx + 9 + ea * 5, eb + 5, 1, 12, '#c9b48a');
+      rect(ctx, sx + 8 + ea * 5, eb + 3, 3, 3, E2.edge);
+    }
   } else if (it.kind === 'potion') {
     rect(ctx, sx + 9, sy + 6 + bob, 6, 3, '#cfd6e4'); rect(ctx, sx + 8, sy + 9 + bob, 8, 9, '#ff5c7a');
     rect(ctx, sx + 10, sy + 11 + bob, 2, 4, 'rgba(255,255,255,.55)');
   } else {
-    var M = MATS[it.tier], yb = sy + bob;
+    var M = matsFor(it.slot)[it.tier], yb = sy + bob;
     ctx.globalAlpha = 0.5 + 0.3 * Math.abs(Math.sin(performance.now() / 400 + it.bob));
     ctx.fillStyle = M.edge; ctx.beginPath(); ctx.arc(sx + 12, yb + 12, 9, 0, 6.2832); ctx.fill();
     ctx.globalAlpha = 1;
@@ -896,6 +1105,11 @@ function drawItem(it, sx, sy) {
     } else if (it.slot === 'shield') {
       rect(ctx, sx + 7, yb + 5, 11, 10, M.col); rect(ctx, sx + 9, yb + 15, 7, 3, M.col);
       rect(ctx, sx + 7, yb + 5, 11, 2, M.edge); rect(ctx, sx + 11, yb + 8, 3, 5, M.edge);
+    } else if (it.slot === 'bow') {
+      ctx.strokeStyle = M.col; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(sx + 15, yb + 12, 8, 2.1, 4.2); ctx.stroke();
+      ctx.strokeStyle = M.edge; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sx + 11, yb + 5); ctx.lineTo(sx + 11, yb + 19); ctx.stroke();
     } else {
       rect(ctx, sx + 7, yb + 6, 11, 12, M.col); rect(ctx, sx + 7, yb + 6, 11, 2, M.edge);
       rect(ctx, sx + 11, yb + 9, 3, 7, M.edge); rect(ctx, sx + 5, yb + 8, 2, 6, M.col); rect(ctx, sx + 18, yb + 8, 2, 6, M.col);
@@ -951,18 +1165,33 @@ function drawHUD() {
     var k = SLOTKEYS[s], tr = hero.gear[k];
     ctx.fillStyle = '#6e7b91'; ctx.fillText(SLOTS[k].label, X + 14, y);
     if (tr < 0) { ctx.fillStyle = '#3f4859'; ctx.fillText('—', X + 76, y); }
-    else { ctx.fillStyle = MATS[tr].edge; rect(ctx, X + 76, y + 2, 6, 6, MATS[tr].col); ctx.fillText(MATS[tr].n, X + 88, y); }
+    else {
+      var MM = matsFor(k)[tr];
+      ctx.fillStyle = MM.edge; rect(ctx, X + 76, y + 2, 6, 6, MM.col);
+      ctx.fillText(MM.n, X + 88, y);
+      if (k === 'bow') { ctx.fillStyle = hero.arrows > 0 ? '#e8d9a8' : '#8a4a4a'; ctx.fillText('\u00d7' + hero.arrows, X + 176, y); }
+    }
     y += 15;
   }
-  y += 6;
+  var pips = 0;
+  for (var e2 = 0; e2 < ELEKEYS.length; e2++) {
+    var ek2 = ELEKEYS[e2], cnt = hero.ammo[ek2];
+    if (!cnt) continue;
+    var px4 = X + 14 + pips * 74;
+    rect(ctx, px4, y + 2, 6, 6, ELEMENTS[ek2].col);
+    ctx.fillStyle = ELEMENTS[ek2].edge; ctx.fillText(ek2 + '\u00d7' + cnt, px4 + 10, y);
+    pips++;
+  }
+  y += pips ? 17 : 4;
 
-  var ms = PW - 44, mx = X + 22;
+  var ms = PW - 60, mx = X + 30;
   ctx.fillStyle = '#000'; ctx.fillRect(mx - 1, y - 1, ms + 2, ms + 2);
   ctx.drawImage(world.mini, mx, y, ms, ms);
   var sc = ms / W, k2;
   for (k2 = 0; k2 < items.length; k2++) {
     var it = items[k2];
-    ctx.fillStyle = it.kind === 'chest' ? '#ffd166' : it.kind === 'potion' ? '#8ef2a0' : MATS[it.tier].edge;
+    ctx.fillStyle = it.kind === 'chest' ? '#ffd166' : it.kind === 'potion' ? '#8ef2a0'
+      : it.kind === 'arrows' ? '#e8d9a8' : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : matsFor(it.slot)[it.tier].edge;
     ctx.fillRect(mx + it.x * sc, y + it.y * sc, 2, 2);
   }
   for (k2 = 0; k2 < mobs.length; k2++) {
@@ -1056,13 +1285,43 @@ function render(dt) {
     else if (ents[a].k === 'm') drawMob(o, o.px * TILE + ox, o.py * TILE + oy);
     else drawHero(o.px * TILE + ox, o.py * TILE + oy);
   }
-  for (var bl = bolts.length - 1; bl >= 0; bl--) {            /* boss projectiles */
-    var B2 = bolts[bl]; B2.t += dt / 320;
-    if (B2.t >= 1) { bolts.splice(bl, 1); continue; }
-    ctx.globalAlpha = 1 - B2.t; ctx.strokeStyle = B2.col; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(B2.x0 * TILE + ox + 12, B2.y0 * TILE + oy + 12);
-    ctx.lineTo(B2.x1 * TILE + ox + 12, B2.y1 * TILE + oy + 12); ctx.stroke();
+  for (var fi = fx.length - 1; fi >= 0; fi--) {              /* impact effects */
+    var F = fx[fi]; F.t += dt / (F.kind === 'chain' ? 300 : 430);
+    if (F.t >= 1) { fx.splice(fi, 1); continue; }
+    ctx.globalAlpha = 1 - F.t;
+    if (F.kind === 'ring') {
+      var rr = F.r * TILE * (0.25 + F.t * 0.95);
+      ctx.strokeStyle = F.col; ctx.lineWidth = 4 * (1 - F.t) + 1;
+      ctx.beginPath(); ctx.arc(F.x * TILE + ox + 12, F.y * TILE + oy + 12, rr, 0, 6.2832); ctx.stroke();
+      ctx.globalAlpha = (1 - F.t) * 0.35; ctx.fillStyle = F.col;
+      ctx.beginPath(); ctx.arc(F.x * TILE + ox + 12, F.y * TILE + oy + 12, rr * 0.8, 0, 6.2832); ctx.fill();
+    } else {
+      ctx.strokeStyle = F.col; ctx.lineWidth = 2;
+      var jx = F.x0 * TILE + ox + 12, jy = F.y0 * TILE + oy + 12;
+      var kx = F.x1 * TILE + ox + 12, ky = F.y1 * TILE + oy + 12;
+      ctx.beginPath(); ctx.moveTo(jx, jy);
+      for (var seg = 1; seg <= 4; seg++) {
+        var tt = seg / 4;
+        ctx.lineTo(lerp(jx, kx, tt) + (seg < 4 ? (Math.random() * 10 - 5) : 0),
+                   lerp(jy, ky, tt) + (seg < 4 ? (Math.random() * 10 - 5) : 0));
+      }
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
+  }
+  for (var sh = shots.length - 1; sh >= 0; sh--) {            /* arrows in flight */
+    var S2 = shots[sh]; S2.t += dt / 190;
+    if (S2.t >= 1) { shots.splice(sh, 1); continue; }
+    var ax0 = S2.x0 * TILE + ox + 12, ay0 = S2.y0 * TILE + oy + 12;
+    var ax1 = S2.x1 * TILE + ox + 12, ay1 = S2.y1 * TILE + oy + 12;
+    var px3 = lerp(ax0, ax1, S2.t), py3 = lerp(ay0, ay1, S2.t);
+    var vx = ax1 - ax0, vy = ay1 - ay0, len = Math.max(1, Math.sqrt(vx * vx + vy * vy));
+    vx /= len; vy /= len;
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(px3 - vx * 9, py3 - vy * 9); ctx.lineTo(px3, py3); ctx.stroke();
+    ctx.strokeStyle = S2.col; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px3 - vx * 9, py3 - vy * 9); ctx.lineTo(px3, py3); ctx.stroke();
+    rect(ctx, px3 - 1, py3 - 1, 3, 3, S2.col);
   }
   ctx.font = 'bold 12px ui-monospace, monospace'; ctx.textAlign = 'center';
   for (var f = floats.length - 1; f >= 0; f--) {
@@ -1085,6 +1344,7 @@ function render(dt) {
   drawHUD();
 
   hero.swing = Math.max(0, hero.swing - dt / 160);
+  hero.shoot = Math.max(0, (hero.shoot || 0) - dt / 220);
   hero.hurt = Math.max(0, hero.hurt - dt / 200);
   for (var m2 = 0; m2 < mobs.length; m2++) {
     mobs[m2].swing = Math.max(0, mobs[m2].swing - dt / 160);
@@ -1096,15 +1356,19 @@ function render(dt) {
 /* ---------------- boot ---------------- */
 function boot() {
   buildBaseSheet();
-  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, killers: {} };
+  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, killers: {} };
   log = []; tick = 0; shake = 0; run = null; hero = null;
-  mobs = []; items = []; floats = []; bolts = [];
+  mobs = []; items = []; floats = []; shots = []; fx = [];
   setPhase('play', 0);
   say('lunchquest — the hero needs no player');
   newRun();
   var q = typeof location !== 'undefined' && location.search ? /card=(\w+)/.exec(location.search) : null;
   if (q) { setPhase(q[1], 100000); phase.t = 42000; }          /* card preview for screenshots */
   if (typeof location !== 'undefined' && /parade/.test(location.search || '')) parade();
+  if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
+    hero.gear = { sword: 3, shield: 3, armor: 3, bow: 3 }; recalc(hero); hero.hp = hero.max;
+    hero.arrows = QUIVER_MAX; hero.ammo = { fire: 9, frost: 9, shock: 9 };
+  }
   var fq = typeof location !== 'undefined' ? /floor=(\d)/.exec(location.search || '') : null;
   if (fq) { run.floor = clamp(+fq[1], 1, FLOORS); buildFloor(run.floor); }
 }

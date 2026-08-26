@@ -29,6 +29,25 @@ orichalcum ladder, with tiers weighted toward the current floor. The hero picks 
 upgrade and ignores anything worse than what it's carrying. Potions go in a pouch (max
 three) rather than being drunk on the spot, and get quaffed at 45% health.
 
+## Ranged combat
+
+One model covers every arrow and bolt in the game: trace a line from the shooter, stop at
+the first wall or body, apply damage there, and draw a tracer along the path. Trees and
+rock block a shot; water doesn't. Archers and imps use it, boss breath uses it (so line of
+sight now matters), and so does the hero once it finds a bow.
+
+Bows are a fourth gear slot with their own ladder — ash → yew → horn → dragonbone —
+raising both damage and range (6–9 tiles). Arrows are finite: quivers lie on the ground,
+archers and imps drop what they were carrying, and the hero tops up at 24. It keeps the
+last couple of arrows in reserve for bosses and closes to melee otherwise.
+
+Elemental arrows are rare — roughly one cache a floor, occasionally out of a chest — and
+the hero saves them for targets that deserve them: **fire** explodes for splash damage
+(used on bosses or a cluster of three), **shock** chains to two more enemies nearby, and
+**frost** freezes a target for three turns (also used when the hero is hurt and needs
+distance). Melee monsters now break into a run when they're being shot at, so kiting
+isn't free.
+
 ## Worldgen
 
 fBm value noise (5 octaves) for elevation, a second noise field for moisture, and a
@@ -64,5 +83,6 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 
 `window.LQ` exposes `hero()`, `mobs()`, `items()`, `stats()`, `run()`, `phase()`, and
 `boss()` for a live run. URL params for development: `?card=died|cleared|victory|title`
-freezes a transition card, `?floor=N` starts on floor N, `?parade=1` lines up the whole
+freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
+orichalcum, a dragonbone bow and elemental arrows, and `?parade=1` lines up the whole
 bestiary next to a frozen hero.
