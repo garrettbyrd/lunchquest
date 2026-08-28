@@ -287,7 +287,10 @@ function genWorld(seed) {
   for (y = 0; y < H; y++) for (x = 0; x < W; x++) { mg.fillStyle = MINI[tiles[y * W + x]]; mg.fillRect(x, y, 1, 1); }
   var trees = [];
   for (i = 0; i < W * H; i++) if (tiles[i] === TREE) trees.push(i);
-  return { seed: seed, tiles: tiles, variant: variant, land: land, comp: comp, islands: islands, trees: trees, mini: mm, rnd: rnd };
+  var fog = newCanvas(W, H), fg = fog.getContext('2d');
+  fg.fillStyle = '#05070c'; fg.fillRect(0, 0, W, H);
+  return { seed: seed, tiles: tiles, variant: variant, land: land, comp: comp, islands: islands, trees: trees,
+           seen: new Uint8Array(W * H), vis: new Int32Array(W * H).fill(-1), seenCount: 0, fog: fog, mini: mm, rnd: rnd };
 }
 function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : world.tiles[y * W + x]; }
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
@@ -435,12 +438,13 @@ function buildFloor(floor) {
     var gs = freeSpot(rnd, hero, slot === 'bow' && floor === 1 ? 7 : 6, world.home);
     items.push({ id: nextId++, kind: 'gear', slot: slot, tier: tier, affix: affixFor(slot, rnd, 0.2), x: gs.x, y: gs.y, bob: rnd() * 6 });
   }
-  run.floorStart = tick;
+  run.floorStart = tick; run.rumor = null;
   say('floor ' + floor + ' — ' + FLOORDEF[clamp(floor - 1, 0, 4)].name);
   cam = { x: hero.x * TILE - VPW / 2, y: hero.y * TILE - VPH / 2 };
 }
 
 function theBoss() { for (var i = 0; i < mobs.length; i++) if (mobs[i].boss) return mobs[i]; return null; }
+function knownBoss() { var b = theBoss(); return b && knownMob(b) ? b : null; }
 
 /* ---------------- pathfinding ---------------- */
 var visit = new Int32Array(W * H), prevB = new Int32Array(W * H), bq = new Int32Array(W * H), st4 = 0;
@@ -479,6 +483,56 @@ function stepToward(sx, sy, tx, ty, budget, avoid, pass) {
   while (prevB[c] !== start && guard++ < W * H) c = prevB[c];
   var fx = c % W, fy = (c - fx) / W;
   return { x: fx - sx, y: fy - sy };
+}
+
+/* ---------------- what the hero knows ----------------
+   The hero only acts on what it has seen. Terrain is remembered once
+   glimpsed; monsters are forgotten a while after they leave sight. */
+var SIGHT = 11, SIGHT_SEA = 16, MOB_MEMORY = 45;
+function seenAt(x, y) { return world.seen[y * W + x]; }
+function visibleAt(x, y) { return world.vis[y * W + x] === tick; }
+function blocksSight(x, y) { return tileAt(x, y) === ROCK; }
+function markSeen(x, y) {
+  var i = y * W + x;
+  world.vis[i] = tick;
+  if (world.seen[i]) return;
+  world.seen[i] = 1; world.seenCount++;
+  var g = world.fog.getContext('2d');
+  g.fillStyle = MINI[world.tiles[i]]; g.fillRect(x, y, 1, 1);
+}
+function updateVision() {
+  var R = hero.sailing ? SIGHT_SEA : SIGHT, R2 = R * R;
+  markSeen(hero.x, hero.y);
+  for (var dy = -R; dy <= R; dy++) for (var dx = -R; dx <= R; dx++) {
+    if (dx * dx + dy * dy > R2) continue;
+    var tx = hero.x + dx, ty = hero.y + dy;
+    if (tx < 0 || ty < 0 || tx >= W || ty >= H) continue;
+    /* walk the line; a ridge of rock hides what is behind it */
+    var ax = Math.abs(dx), sx = dx > 0 ? 1 : -1, ay = -Math.abs(dy), sy = dy > 0 ? 1 : -1;
+    var err = ax + ay, x = hero.x, y = hero.y, guard = 0;
+    while (guard++ < R * 2 + 3) {
+      if (x !== hero.x || y !== hero.y) {
+        markSeen(x, y);
+        if (blocksSight(x, y)) break;
+      }
+      if (x === tx && y === ty) break;
+      var e2 = 2 * err;
+      if (e2 >= ay) { err += ay; x += sx; }
+      if (e2 <= ax) { err += ax; y += sy; }
+    }
+  }
+  for (var i = 0; i < items.length; i++) if (visibleAt(items[i].x, items[i].y)) items[i].known = 1;
+  for (var m = 0; m < mobs.length; m++) {
+    if (!visibleAt(mobs[m].x, mobs[m].y)) continue;
+    mobs[m].seenT = tick; mobs[m].lx = mobs[m].x; mobs[m].ly = mobs[m].y;
+  }
+}
+function knownMob(m) { return m.seenT !== undefined && tick - m.seenT <= MOB_MEMORY; }
+function knownItem(o) { return !!o.known; }
+function islandKnown(id) {
+  var t = islandTiles(id);
+  for (var i = 0; i < t.length; i += 3) if (world.seen[t[i]]) return true;
+  return false;
 }
 
 /* ---------------- ranged combat ----------------
@@ -721,6 +775,7 @@ function nearestOf(list, ok) {
   for (var i = 0; i < list.length; i++) {
     var o = list[i];
     if (banned(o.id) || (ok && !ok(o))) continue;
+    if (o.kind ? !knownItem(o) : !knownMob(o)) continue;      /* out of sight, out of mind */
     var d = dist(hero, o);
     if (d < bd) { bd = d; best = o; }
   }
@@ -740,12 +795,43 @@ function readyForBoss(boss) {
   return turnsToLive > turnsToKill * slog;
 }
 function threatNear(range) {
-  for (var i = 0; i < mobs.length; i++) if (dist(hero, mobs[i]) <= range) return mobs[i];
+  for (var i = 0; i < mobs.length; i++) if (knownMob(mobs[i]) && dist(hero, mobs[i]) <= range) return mobs[i];
   return null;
 }
 /* pick the reachable spot that puts the most ground between us and the threat */
+/* the edge of the map the hero has drawn for itself */
+function frontierSpot(wantSea) {
+  var C = world.fcache || (world.fcache = {});
+  var key = wantSea ? 'sea' : 'land';
+  if (C[key] && tick - C[key].t < 6) return C[key].spot;
+  var spot = frontierScan(wantSea);
+  C[key] = { t: tick, spot: spot };
+  return spot;
+}
+function frontierScan(wantSea) {
+  var best = null, bd = 1e9, bx = hero.x, by = hero.y;
+  for (var y = 1; y < H - 1; y++) for (var x = 1; x < W - 1; x++) {
+    var i = y * W + x;
+    if (!world.seen[i]) continue;
+    if (!(walkable(x, y) || (hero.boat && world.tiles[i] <= WATER))) continue;
+    if (!hero.boat && world.tiles[i] <= WATER) continue;
+    if (!hero.boat && walkable(x, y) && islandAt(x, y) !== islandAt(hero.x, hero.y)) continue;
+    var edge = 0;
+    for (var d = 0; d < 4; d++) {
+      var nx = x + DX[d], ny = y + DY[d];
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      if (!world.seen[ny * W + nx]) { edge = 1; break; }
+    }
+    if (!edge) continue;
+    if (wantSea && islandAt(x, y) === islandAt(hero.x, hero.y) && world.tiles[i] > WATER) continue;
+    var dd = Math.abs(x - bx) + Math.abs(y - by);
+    if (dd < 4) continue;                                     /* not the tile we're stood on */
+    if (dd < bd) { bd = dd; best = { x: x, y: y }; }
+  }
+  return best;
+}
 function safeSpot(minD) {
-  var b = theBoss(), ready = b && readyForBoss(b);
+  var b = knownBoss(), ready = b && readyForBoss(b);
   for (var i = 0; i < 24; i++) {
     var c = freeSpot(Math.random, hero, minD, islandAt(hero.x, hero.y));
     if (!b || ready || Math.abs(c.x - b.x) + Math.abs(c.y - b.y) > 14) return c;
@@ -766,8 +852,11 @@ function offIsland(o) {
   var oi = islandAt(o.x, o.y);
   return oi >= 0 && oi !== islandAt(hero.x, hero.y);
 }
+function unexploredHere() { return !!frontierSpot(0); }
 function boatPlan() {
   if (hero.boat) return null;
+  var pull = run.rumor && islandAt(run.rumor.x, run.rumor.y) !== islandAt(hero.x, hero.y);
+  if (!pull && unexploredHere()) return null;                 /* no reason to sail yet */
   if (hero.gear.axe < 0) {
     var axe = nearestOf(items, function (o) { return o.kind === 'gear' && o.slot === 'axe'; });
     if (axe) return { kind: 'item', o: axe.o, why: 'seeking an axe' };
@@ -789,7 +878,7 @@ function chooseTarget() {
   /* interrupts, in order */
   for (var i = 0; i < mobs.length; i++) if (dist(hero, mobs[i]) <= 1) return { kind: 'mob', o: mobs[i], why: 'fighting ' + (mobs[i].sname || mobs[i].name) };
   if (hero.hp < hero.max * 0.45 && hero.potions > 0) return { kind: 'quaff' };
-  var bss = theBoss();
+  var bss = knownBoss();
   if (bss && bss.wake && dist(hero, bss) <= 7 && !readyForBoss(bss)) {
     if (!hero.lock || hero.lock.why !== 'fleeing ' + (bss.sname || bss.name) || !targetValid(hero.lock)) {
       hero.lock = { kind: 'spot', o: fleeSpot(bss), why: 'fleeing ' + (bss.sname || bss.name) }; hero.lockT = 22;
@@ -808,15 +897,24 @@ function chooseTarget() {
 
   if (hero.lockT > 0 && targetValid(hero.lock)) { hero.lockT--; return hero.lock; }
 
+  /* curiosity: with nothing pressing, sometimes go and look at the dark */
+  if (hero.hp > hero.max * 0.7 && Math.random() < 0.10 && !threatNear(9)) {
+    var peek = frontierSpot(0);
+    if (peek && dist(hero, peek) < 45) {
+      hero.lock = { kind: 'spot', o: peek, why: 'having a look around' };
+      hero.lockT = 30; return hero.lock;
+    }
+  }
+
   var lk = null;
-  var boss = theBoss();
+  var boss = knownBoss();                                     /* can't hunt what we haven't found */
   var keepAway = boss && !readyForBoss(boss) ? boss : null;
   var reach = function (o) { return hero.boat || !offIsland(o); };
   var far0 = function (o) { return !keepAway || dist(keepAway, o) > 8; };
   var far = function (o) { return far0(o) && reach(o); };
-  var potion = nearestOf(items, function (o) { return o.kind === 'potion' && far(o); });
+  var potion = nearestOf(items, function (o) { return o.kind === 'potion' && hero.potions < 4 && far(o); });
   var gear = nearestOf(items, function (o) { return o.kind === 'gear' && gearScore(o.slot, o.tier, o.affix) > 0 && far(o); });
-  var quiver = nearestOf(items, function (o) { return o.kind === 'arrows' && far(o); });
+  var quiver = nearestOf(items, function (o) { return o.kind === 'arrows' && hero.arrows < QUIVER_MAX && far(o); });
   var rare = nearestOf(items, function (o) { return o.kind === 'ammo'; });
   var mob = nearestOf(mobs, function (o) { return !o.boss && far(o); });
   var chest = nearestOf(items, function (o) { return o.kind === 'chest' && far(o); });
@@ -833,8 +931,21 @@ function chooseTarget() {
   else if (mob) lk = { kind: 'mob', o: mob.o, why: 'tracking a ' + mob.o.name };
   else if (boss && !banned(boss.id) && reach(boss)) lk = { kind: 'mob', o: boss, why: 'seeking ' + (boss.sname || boss.n) };
   else {
-    var plan = boatPlan();                                    /* nothing left here — put to sea */
-    lk = plan || { kind: 'spot', o: safeSpot(14), why: 'exploring' };
+    var rumorHere = run.rumor && (hero.boat || islandAt(run.rumor.x, run.rumor.y) === islandAt(hero.x, hero.y));
+    if (run.rumor && !knownBoss() && rumorHere && Math.random() < 0.8) {
+      lk = { kind: 'spot', o: run.rumor, why: 'chasing the roar' };
+      if (dist(hero, run.rumor) <= 3) run.rumor = null;       /* nothing here — keep looking */
+    }
+    if (!lk && run.rumor && !rumorHere) lk = boatPlan();      /* it came from over there */
+    if (!lk) {
+      var fr = frontierSpot(0);
+      if (fr) lk = { kind: 'spot', o: fr, why: 'exploring' };
+    }
+    if (!lk) lk = boatPlan();                                 /* land's end — put to sea */
+    if (!lk) {
+      var sea = frontierSpot(1);
+      lk = sea ? { kind: 'spot', o: sea, why: 'sailing onward' } : { kind: 'spot', o: safeSpot(14), why: 'wandering' };
+    }
   }
 
   hero.lock = lk;
@@ -877,6 +988,7 @@ function heroShot(target) {
 }
 
 function heroTurn() {
+  updateVision();
   hero.hist.push(hero.x * 1000 + hero.y);
   if (hero.hist.length > 24) hero.hist.shift();
 
@@ -909,7 +1021,7 @@ function heroTurn() {
     if (dist(hero, tg.o) <= 1) { heroAttack(tg.o); return; }
     if (heroShot(tg.o)) { hero.intent = 'loosing at ' + (tg.o.sname || tg.o.name); return; }
   }
-  var bs2 = theBoss(), avoid = null;
+  var bs2 = knownBoss(), avoid = null;
   if (bs2 && !readyForBoss(bs2) && !(tg.kind === 'mob' && tg.o === bs2)) avoid = { x: bs2.x, y: bs2.y, r: 9 };
   var st = stepToward(hero.x, hero.y, tg.o.x, tg.o.y, 26000, avoid, heroPass);
   if (!st && avoid && tg.kind !== 'spot') { if (tg.o.id) hero.ban[tg.o.id] = tick + 50; hero.lock = null; hero.lockT = 0; return; }
@@ -926,13 +1038,13 @@ function heroTurn() {
     var it = items[i];
     if (it.x !== hero.x || it.y !== hero.y) continue;
     if (it.kind === 'potion') {
-      if (hero.potions >= 4) continue;
+      if (hero.potions >= 4) { hero.ban[it.id] = tick + 250; continue; }
       items.splice(i, 1); hero.potions++; fl(hero.x, hero.y, 'potion', '#8ef2a0'); say('pockets a potion'); progress();
     } else if (it.kind === 'chest') {
       items.splice(i, 1);
       openChest(it);
     } else if (it.kind === 'arrows') {
-      if (hero.arrows >= QUIVER_MAX) continue;
+      if (hero.arrows >= QUIVER_MAX) { hero.ban[it.id] = tick + 250; continue; }
       items.splice(i, 1);
       var got = Math.min(it.n, QUIVER_MAX - hero.arrows); hero.arrows += got;
       fl(hero.x, hero.y, '+' + got + ' arrows', '#e8d9a8'); say('gathers ' + got + ' arrows'); progress();
@@ -944,7 +1056,7 @@ function heroTurn() {
       fl(hero.x, hero.y, it.ele + ' arrow!', ELEMENTS[it.ele].edge);
       say('★ finds ' + it.n + ' ' + it.ele + ' arrow' + (it.n > 1 ? 's' : '')); progress();
     } else if (it.kind === 'gear') {
-      if (gearScore(it.slot, it.tier, it.affix) <= 0) continue;
+      if (gearScore(it.slot, it.tier, it.affix) <= 0) { hero.ban[it.id] = tick + 400; continue; }
       items.splice(i, 1);
       hero.gear[it.slot] = it.tier; hero.affix[it.slot] = it.affix || null; recalc(hero);
       var nm = gearName(it.slot, it.tier, it.affix);
@@ -1045,6 +1157,15 @@ function heroDied() {
 
 function doTurn() {
   tick++;
+  if (phase.name === 'play' && tick % 130 === 0) {
+    var bz = theBoss();
+    if (bz && !knownMob(bz)) {                                /* a rumour, not a map pin */
+      var jitter = 6;
+      run.rumor = { x: clamp(bz.x + (Math.random() * jitter * 2 | 0) - jitter, 1, W - 2),
+                    y: clamp(bz.y + (Math.random() * jitter * 2 | 0) - jitter, 1, H - 2) };
+      say('a distant roar rolls across the water');
+    }
+  }
   if (parading) return;
   if (phase.name !== 'play') {
     phase.t += TURN_MS;
@@ -1070,12 +1191,12 @@ function doTurn() {
     if (tick % m.ev === 0) mobTurn(m);
     if (phase.name !== 'play') return;
   }
-  if (tick % 110 === 0) {
+  if (tick % 210 === 0) {
     var rank = 0;
     for (var w = 0; w < mobs.length; w++) if (!mobs[w].boss) rank++;
-    if (rank < (run.floor === 1 ? 4 : 5)) { spawnWanderer(); if (Math.random() < 0.4) spawnWanderer(); }
+    if (rank < (run.floor === 1 ? 3 : 4)) { spawnWanderer(); if (Math.random() < 0.3) spawnWanderer(); }
   }
-  if (tick - hero.lastProgress > 900) { say('the trail goes cold'); stats.unstuck++; buildFloor(run.floor); }
+  if (tick - hero.lastProgress > 1400) { say('the trail goes cold'); stats.unstuck++; buildFloor(run.floor); }
 }
 
 /* ---------------- rendering ---------------- */
@@ -1390,7 +1511,7 @@ function bar(x, y, w, h, frac, col, bg) {
 }
 
 function drawBossBar() {
-  var b = theBoss();
+  var b = knownBoss();
   if (!b || !b.wake || dist(b, hero) > 22) return;
   var w = 420, x = (VPW - w) / 2, y = 22;
   rect(ctx, x - 2, y - 2, w + 4, 14, 'rgba(0,0,0,.62)');
@@ -1409,6 +1530,7 @@ function drawHUD() {
   ctx.font = '10px ui-monospace, monospace'; ctx.fillStyle = '#7f8ca3';
   ctx.fillText('run ' + run.n + ' · floor ' + run.floor + '/' + FLOORS, X + 14, 30);
   ctx.fillText('seed ' + run.seed.toString(16), X + 150, 30);
+  ctx.fillText('explored ' + Math.round(world.seenCount / (W * H) * 100) + '%', X + 150, 42);
   ctx.fillStyle = '#5f6b80';
   ctx.fillText(FLOORDEF[clamp(run.floor - 1, 0, 4)].name, X + 14, 42);
 
@@ -1463,10 +1585,11 @@ function drawHUD() {
 
   var ms = PW - 74, mx = X + 37;
   ctx.fillStyle = '#000'; ctx.fillRect(mx - 1, y - 1, ms + 2, ms + 2);
-  ctx.drawImage(world.mini, mx, y, ms, ms);
+  ctx.drawImage(world.fog, mx, y, ms, ms);
   var sc = ms / W, k2;
   for (k2 = 0; k2 < items.length; k2++) {
     var it = items[k2];
+    if (!it.known) continue;
     ctx.fillStyle = it.kind === 'chest' ? (it.ornate ? '#fff4c2' : '#ffd166') : it.kind === 'potion' ? '#8ef2a0'
       : it.kind === 'arrows' ? '#e8d9a8' : it.kind === 'wood' ? '#d9b487'
       : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : matsFor(it.slot)[it.tier].edge;
@@ -1474,8 +1597,12 @@ function drawHUD() {
   }
   for (k2 = 0; k2 < mobs.length; k2++) {
     var mb = mobs[k2];
-    if (mb.boss) { ctx.fillStyle = '#ff2d2d'; ctx.fillRect(mx + mb.x * sc - 2, y + mb.y * sc - 2, 6, 6); }
-    else { ctx.fillStyle = '#ff5c5c'; ctx.fillRect(mx + mb.x * sc, y + mb.y * sc, 2, 2); }
+    if (!knownMob(mb)) continue;
+    var live = visibleAt(mb.x, mb.y), bx2 = live ? mb.x : mb.lx, by2 = live ? mb.y : mb.ly;
+    ctx.globalAlpha = live ? 1 : 0.45;
+    if (mb.boss) { ctx.fillStyle = '#ff2d2d'; ctx.fillRect(mx + bx2 * sc - 2, y + by2 * sc - 2, 6, 6); }
+    else { ctx.fillStyle = '#ff5c5c'; ctx.fillRect(mx + bx2 * sc, y + by2 * sc, 2, 2); }
+    ctx.globalAlpha = 1;
   }
   ctx.fillStyle = '#ffffff'; ctx.fillRect(mx + hero.x * sc - 1, y + hero.y * sc - 1, 4, 4);
   ctx.strokeStyle = '#2a3547'; ctx.strokeRect(mx - 1.5, y - 1.5, ms + 3, ms + 3);
@@ -1551,19 +1678,29 @@ function render(dt) {
   var x0 = Math.max(0, ((cam.x / TILE) | 0) - 1), y0 = Math.max(0, ((cam.y / TILE) | 0) - 1);
   var x1 = Math.min(W - 1, x0 + (VPW / TILE | 0) + 2), y1 = Math.min(H - 1, y0 + (VPH / TILE | 0) + 2);
   for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
-    var idx = yy * W + xx;
-    ctx.drawImage(sheet, world.variant[idx] * TILE, world.tiles[idx] * TILE, TILE, TILE, xx * TILE + ox, yy * TILE + oy, TILE, TILE);
+    var idx = yy * W + xx, dx2 = xx * TILE + ox, dy2 = yy * TILE + oy;
+    if (!world.seen[idx]) { rect(ctx, dx2, dy2, TILE, TILE, '#05070c'); continue; }
+    ctx.drawImage(sheet, world.variant[idx] * TILE, world.tiles[idx] * TILE, TILE, TILE, dx2, dy2, TILE, TILE);
+    if (world.vis[idx] !== tick) rect(ctx, dx2, dy2, TILE, TILE, 'rgba(4,6,12,.58)');
   }
   var ents = [], a;
-  for (a = 0; a < items.length; a++) ents.push({ y: items[a].y, d: items[a], k: 'i' });
-  for (a = 0; a < mobs.length; a++) ents.push({ y: mobs[a].py, d: mobs[a], k: 'm' });
+  for (a = 0; a < items.length; a++) if (items[a].known) ents.push({ y: items[a].y, d: items[a], k: 'i' });
+  for (a = 0; a < mobs.length; a++) {
+    var mm3 = mobs[a];
+    if (visibleAt(mm3.x, mm3.y)) ents.push({ y: mm3.py, d: mm3, k: 'm' });
+    else if (knownMob(mm3)) ents.push({ y: mm3.ly, d: mm3, k: 'g' });
+  }
   ents.push({ y: hero.py, d: hero, k: 'h' });
   ents.sort(function (p, q) { return p.y - q.y; });
   for (a = 0; a < ents.length; a++) {
     var o = ents[a].d;
     if (ents[a].k === 'i') drawItem(o, o.x * TILE + ox, o.y * TILE + oy);
     else if (ents[a].k === 'm') drawMob(o, o.px * TILE + ox, o.py * TILE + oy);
-    else drawHero(o.px * TILE + ox, o.py * TILE + oy);
+    else if (ents[a].k === 'g') {
+      ctx.globalAlpha = 0.26;                                  /* a memory, not a sighting */
+      drawMob(o, o.lx * TILE + ox, o.ly * TILE + oy);
+      ctx.globalAlpha = 1;
+    } else drawHero(o.px * TILE + ox, o.py * TILE + oy);
   }
   for (var fi = fx.length - 1; fi >= 0; fi--) {              /* impact effects */
     var F = fx[fi]; F.t += dt / (F.kind === 'chain' ? 300 : 430);

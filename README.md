@@ -95,11 +95,29 @@ and the occasional elemental arrow. The hero equips what beats its kit and drops
 on the ground. Ornate chests — the ones across the water — roll more, roll richer, and
 always contain a piece of gear.
 
+## What the hero knows
+
+The hero is not given the map. It sees about 11 tiles (16 from a boat), a ridge of rock
+blocks the view behind it, and everything else is dark. Terrain, once glimpsed, is
+remembered; monsters are remembered for about 45 turns after they leave sight and then
+forgotten. The view renders exactly this — black where the hero has never been, dimmed
+where it is working from memory, lit where it can currently see — and monsters it only
+half-remembers are drawn as faint ghosts at their last known position. The minimap fills
+in as the run goes, and the HUD shows how much of the floor has been walked.
+
+Every decision runs off that partial picture. It cannot path to a chest it hasn't found or
+hunt a boss it hasn't laid eyes on. With nothing pressing it heads for the nearest
+*frontier* — a tile it has seen that borders somewhere it hasn't — and it will break off
+now and then just to go look at the dark. A boss that stays unfound long enough starts to
+roar, which gives the hero a rough bearing rather than a map pin; if the roar came from
+across the water, that is what sends it looking for an axe.
+
 ## The brain
 
-Priority loop, re-decided every 145 ms turn: quaff if wounded → hit an adjacent foe →
-run from a boss it isn't ready for → claim a gear upgrade → fight the boss if the math
-works → hunt trash → loot → explore. Pathing is BFS over walkable tiles with a stamped
+Priority loop, re-decided every 145 ms turn, over known things only: quaff if wounded →
+hit an adjacent foe → run from a boss it isn't ready for → claim a gear upgrade → fight
+the boss if the math works → hunt trash → loot → chase a roar → explore the frontier →
+put to sea. Pathing is BFS over walkable tiles with a stamped
 visit buffer, and it routes *around* a boss's aggro radius until the hero means to fight
 it — waking a boss early is how runs used to end at level 1.
 
