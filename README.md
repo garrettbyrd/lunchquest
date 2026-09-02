@@ -1,7 +1,9 @@
 # Lunchquest
 
 A self-playing roguelike that runs unattended in a browser tab. No dependencies, no build
-step, no assets on disk — every tile texture and sprite is drawn procedurally at boot.
+step, no assets on disk — every tile texture and sprite is drawn procedurally at boot,
+and the fourteen bosses are hand-pixelled bitmaps kept as text in the source, coloured
+from each boss's palette and cached to offscreen canvases the first time they're seen.
 
     python3 serve.py 8765     # → http://127.0.0.1:8765/
 
@@ -9,16 +11,17 @@ Localhost only. Refresh for a fresh seed.
 
 ## A run
 
-Five floors. Floors 1–4 each get a boss drawn at random from a pool of ten; floor 5 is
-always Xanthemar, the Undying — the lich. Clear a floor and the hero descends with its
+Five floors. Floors 1–4 each get a boss — three drawn from the land pool and one from the
+sea, in random order; floor 5 is always Xanthemar, the Undying — the lich. Clear a floor and the hero descends with its
 gear and levels intact. Die and the run ends: `YOU DIED`, a title card, then a new hero
 starts over at floor 1. Each floor has its own palette (Verdant Shore → Amber Reach →
 Ashen Waste → Frostmarch → The Black Vault), applied as hue/saturation blend passes over
 the shared tilesheet.
 
-The boss pool: Vermathrax the Ember, The Broodmother, Grond Bull of the Deep, Sablecoil
-the Basilisk, The Kraken of Still Water, Aurex Stone Warden, Skarn the Wyvern, The
-Chimera, Malzeth the Necromancer, The Hollow Wraith. Each has one trick — ranged breath,
+The land boss pool: Vermathrax the Ember, The Broodmother, Grond Bull of the Deep,
+Sablecoil the Basilisk, Aurex Stone Warden, Skarn the Wyvern, The Chimera, Malzeth the
+Necromancer, The Hollow Wraith. Three of the four floor bosses come from there and one
+always comes from the water (see below). Each has one trick — ranged breath,
 minion summoning, a three-tile charge, life drain, or just a lot of armor. The lich does
 most of them at once and heals itself.
 
@@ -27,7 +30,7 @@ most of them at once and heals itself.
 Blades, shields, and armor spawn on the ground in an iron → steel → electrum →
 orichalcum ladder, with tiers weighted toward the current floor. The hero picks up an
 upgrade and ignores anything worse than what it's carrying. Potions go in a pouch (max
-three) rather than being drunk on the spot, and get quaffed at 45% health.
+four) rather than being drunk on the spot, and get quaffed at 45% health.
 
 ## Ranged combat
 
@@ -47,6 +50,37 @@ the hero saves them for targets that deserve them: **fire** explodes for splash 
 **frost** freezes a target for three turns (also used when the hero is hurt and needs
 distance). Melee monsters now break into a run when they're being shot at, so kiting
 isn't free.
+
+## Stamina
+
+Everything that breathes — hero, trash, bosses, the lich — is a `Being`: a place on the
+map, health, stamina, and the animation counters the renderer wants. `Hero` and `Mob` hang
+their own bookkeeping off that one prototype, so the stamina rules below are written once
+and apply to all of them.
+
+Actions cost wind, Morrowind-style. A sword swing costs four (five for a heavy blade), a
+bow shot three, a boss's blow six, a boss charge twelve, a summoning eight. Chopping and
+boat-building take a little every turn. Running out doesn't stop anyone: a winded
+creature still fights, but its blows land at 60% strength, scaling back up to full at half
+stamina. A winded archer can't draw and closes to melee instead; a boss that can't afford
+its trick walks up and hits you like anything else.
+
+Stamina comes back at the end of a turn based on what the body did: nothing → a full
+breath (three a turn for a fresh hero, more as its pool grows; two for trash, three for
+bosses, four for the lich); a walk → one; a fight or a sprint → none. Gear can carry a
+*vigorous* enchantment that widens the pool, level-ups widen it and refill it, potions
+restore some, and a new floor starts fresh.
+
+**Walk or run.** Anyone with wind to spare can take a second step in a turn for three
+stamina, never on water. The hero sprints when fleeing, when badly hurt and heading for a
+potion, when closing on a foe while above half stamina, and otherwise only when well
+rested and it just wants to get somewhere. Melee monsters sprint to run down a hero who is
+shooting at them, as long as they can afford it. The HUD marks a running turn with `»` and
+a sprinting body kicks up dust behind it.
+
+**Catching breath.** With nothing threatening within seven tiles and stamina under a
+fifth, the hero stands still until it is back over 70%. It won't start a boss fight below
+half stamina either, though once engaged the damage race decides things as before.
 
 ## Seeds
 
@@ -78,6 +112,32 @@ does — so each floor poses the problem again with a better kit.
 
 Monsters can't follow onto water, but archers and boss breath still reach you out there.
 
+## The water
+
+The sea is no longer a safe corridor. Eels, jellies and nixies (which cast from five
+tiles) live in the shallows and can only move through water; crabs are amphibious and
+harpies fly, so both will come ashore after you. Something that only swims cannot touch a
+hero standing inland, which makes backing away from the water's edge and shooting a real
+tactic — and it is what the hero does.
+
+A boat has a hull worth three hits. Sea creatures strike harder at a hero who is afloat,
+and every hit they land has a good chance of taking a plank with it. When the hull goes,
+the hero is in the water: it swims, every stroke costs stamina and none comes back, it
+cannot use the bow, and once the stamina is gone it starts to drown — a point of health
+every other turn until it drags itself ashore.
+
+Every archipelago has a few islets too small to be called islands. Each holds a guard or
+two and something worth the crossing — often an ornate chest, sometimes a mimic, which is
+a chest with teeth.
+
+## The deep bosses
+
+Four of them, and every run draws exactly one: the Kraken of Still Water (summons its own
+shoal), Grandfather Sturgeon (an armoured bulk that charges), the Siren of Salt Harbour
+(sings from a distance), and Nessa of the Long Loch (a charging long-neck). They hold the
+water rather than an island, so the hero either sails out to meet one or stands on the
+beach and empties a quiver into it.
+
 ## Loot
 
 Five material tiers — iron, steel, elven, glass, ebony (bows: ash, yew, elven, glass,
@@ -86,8 +146,8 @@ of the run's shape.
 
 Loot can carry one enchantment, which is where most of the run-to-run variance lives:
 *keen* and *cruel* add damage, *vampiric* leeches a quarter of melee damage back,
-*burning* sets fire to what it hits, *sturdy* and *warded* harden the hero, *swift* adds
-bow range. The hero values a piece by tier and enchantment together, so a keen steel blade
+*burning* sets fire to what it hits, *sturdy* and *warded* harden the hero, *vigorous*
+deepens its stamina pool, *swift* adds bow range. The hero values a piece by tier and enchantment together, so a keen steel blade
 can beat a plain elven one.
 
 Chests roll real contents rather than a pile of gold: coin, potions, arrows, wood, gear,
@@ -114,10 +174,10 @@ across the water, that is what sends it looking for an axe.
 
 ## The brain
 
-Priority loop, re-decided every 145 ms turn, over known things only: quaff if wounded →
-hit an adjacent foe → run from a boss it isn't ready for → claim a gear upgrade → fight
-the boss if the math works → hunt trash → loot → chase a roar → explore the frontier →
-put to sea. Pathing is BFS over walkable tiles with a stamped
+Priority loop, re-decided every 145 ms turn, over known things only: hit an adjacent foe →
+swim for shore → quaff if wounded → catch breath if winded and unthreatened → run from a
+boss it isn't ready for → claim a gear upgrade → fight the boss if the math works → hunt
+trash → loot → chase a roar → explore the frontier → put to sea. Pathing is BFS over walkable tiles with a stamped
 visit buffer, and it routes *around* a boss's aggro radius until the hero means to fight
 it — waking a boss early is how runs used to end at level 1.
 
@@ -141,5 +201,5 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 `window.LQ` exposes `hero()`, `mobs()`, `items()`, `stats()`, `run()`, `phase()`, and
 `boss()` for a live run. URL params for development: `?card=died|cleared|victory|title`
 freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
-ebony, a dragonbone bow and elemental arrows, `?seed=hex` replays a run, and `?parade=1`
+ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, and `?parade=1`
 lines up the whole bestiary next to a frozen hero.
