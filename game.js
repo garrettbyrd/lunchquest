@@ -93,7 +93,8 @@ function affixWorth(a) {
   return (A.atk || 0) + (A.def || 0) * 2 + (A.hp || 0) * 0.3 + (A.stam || 0) * 0.3 + (A.leech ? 5 : 0) + (A.fire ? 5 : 0) + (A.rng ? 4 : 0);
 }
 function gearName(slot, tier, affix) {
-  return (affix ? affix + ' ' : '') + matsFor(slot)[tier].n + ' ' + SLOTS[slot].label;
+  var M = matsFor(slot);
+  return (affix ? affix + ' ' : '') + M[clamp(tier, 0, M.length - 1)].n + ' ' + SLOTS[slot].label;
 }
 var BOWMATS = [
   { n: 'ash',        col: '#a8794a', edge: '#d9b487' },
@@ -344,7 +345,7 @@ function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : wor
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
 
 /* ---------------- state ---------------- */
-var hero, mobs, items, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
+var hero, mobs, items, builds, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
 
 function say(m) { log.push(m); if (log.length > 6) log.shift(); }
 function fl(x, y, txt, col) { floats.push({ x: x, y: y, txt: txt, col: col, t: 0 }); }
@@ -392,13 +393,21 @@ function Hero() {
   this.potions = 2; this.arrows = 0; this.ammo = { fire: 0, frost: 0, shock: 0 };
   this.gear = { sword: 0, shield: -1, armor: -1, bow: -1, axe: -1 };
   this.affix = { sword: null, shield: null, armor: null, bow: null, axe: null };
-  this.wood = 0; this.boat = 0; this.boatHp = 0; this.sailing = 0; this.swimming = 0; this.chop = null; this.build = null;
+  this.wood = 0; this.scrap = 0; this.pack = [];
+  this.boat = 0; this.boatHp = 0; this.sailing = 0; this.swimming = 0; this.chop = null; this.build = null;
   this.intent = 'descending'; this.lock = null; this.lockT = 0; this.resting = 0; this.ran = 0;
   this.hist = []; this.lastProgress = 0; this.ban = {};
   recalc(this); this.hp = this.max; this.stam = this.stamMax;
 }
 Hero.prototype = Object.create(Being.prototype);
 Hero.prototype.constructor = Hero;
+/* a load on the back is a load on the lungs */
+Hero.prototype.breathe = function () {
+  var e = encumbrance(), save = this.stamRegen;
+  if (e) this.stamRegen = Math.max(1, save - (e === 2 ? 3 : 1));
+  Being.prototype.breathe.call(this);
+  this.stamRegen = save;
+};
 /* the cost of a swing goes up with the weight of the blade */
 Hero.prototype.meleeCost = function () { return STAM.melee + (this.gear.sword > 1 ? 1 : 0); };
 
@@ -449,6 +458,7 @@ function recalc(h) {
     if (A.fire) h.burn = 1;
   }
   h.stamRegen = Math.max(3, Math.round(h.stamMax / 16));     /* a bigger pool refills faster */
+  h.cap = PACK_BASE + (h.lvl - 1) * PACK_LVL + (h.gear.armor >= 0 ? (h.gear.armor + 1) * 2 : 0);
   if (h.hp > h.max) h.hp = h.max;
   if (h.stam > h.stamMax) h.stam = h.stamMax;
 }
@@ -485,7 +495,7 @@ function newRun(seed) {
   var plan = order.slice(0, FLOORS - 2);                      /* three from the land */
   plan.push(SEABOSSES[rng() * SEABOSSES.length | 0]);         /* and one from the water */
   for (i = plan.length - 1; i > 0; i--) { j = rng() * (i + 1) | 0; tmp = plan[i]; plan[i] = plan[j]; plan[j] = tmp; }
-  run = { n: (run ? run.n + 1 : 1), seed: seed >>> 0, rng: rng, floor: 1, floorStart: tick, plan: plan };
+  run = { n: (run ? run.n + 1 : 1), seed: seed >>> 0, rng: rng, floor: 1, floorStart: tick, plan: plan, cache: null, campAt: null };
   hero = newHero();
   say('run ' + run.n + ' \u00b7 seed ' + run.seed.toString(16));
   buildFloor(1);
@@ -498,13 +508,27 @@ function buildFloor(floor) {
   sheet = sheetFor(floor);
   applyRecipe(world.mini, FLOORDEF[clamp(floor - 1, 0, FLOORDEF.length - 1)].recipe);
   var rnd = world.rnd;
-  mobs = []; items = []; floats = []; shots = []; fx = [];
+  mobs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   world.home = world.islands[0].id;
   var spot = freeSpot(rnd, null, 0, world.home);
   hero.x = spot.x; hero.y = spot.y; hero.px = spot.x; hero.py = spot.y;
   hero.lock = null; hero.lockT = 0; hero.ban = {}; hero.hist = []; hero.lastProgress = tick;
   hero.boat = 0; hero.sailing = 0; hero.swimming = 0; hero.boatHp = 0; hero.chop = null; hero.build = null;
   hero.stam = hero.stamMax; hero.resting = 0; hero.exert = 0;
+  run.campAt = null;
+  if (run.cache) {                                            /* the stash, hauled down and set out */
+    var cq = null;
+    for (var cd = 0; cd < 4 && !cq; cd++) {
+      var nx2 = hero.x + DX[cd], ny2 = hero.y + DY[cd];
+      if (walkable(nx2, ny2)) cq = { x: nx2, y: ny2 };
+    }
+    if (cq) items.push({ id: nextId++, kind: 'cache', hold: run.cache, known: 1, x: cq.x, y: cq.y, bob: rnd() * 6 });
+    else {                                                    /* boxed in: just hand it over */
+      hero.wood += run.cache.wood; hero.scrap += run.cache.scrap;
+      for (var cg = 0; cg < run.cache.gear.length; cg++) stow(run.cache.gear[cg]);
+    }
+    run.cache = null;
+  }
 
   /* rank-and-file */
   var pool = [];
@@ -835,10 +859,13 @@ function tryMove(e, dx, dy) {
 }
 /* a second step in one turn.  Costs stamina, kicks up dust, never on water. */
 function tryRun(e, dx, dy) {
-  if (!e.canAfford(STAM.run) || tileAt(e.x, e.y) <= WATER) return false;
+  var enc = e === hero ? encumbrance() : 0;
+  if (enc > 1) return false;                                  /* too laden to break into a run */
+  var cost = STAM.run * (enc ? 2 : 1);
+  if (!e.canAfford(cost) || tileAt(e.x, e.y) <= WATER) return false;
   var ox = e.x, oy = e.y;
   if (!tryMove(e, dx, dy)) return false;
-  e.spend(STAM.run);
+  e.spend(cost);
   fx.push({ kind: 'ring', x: ox, y: oy, t: 0, col: 'rgba(225,212,185,.55)', r: 0.45 });
   return true;
 }
@@ -883,8 +910,12 @@ function openChest(it) {
     else if (L.kind === 'ammo') { hero.ammo[L.ele] += L.n; got.push(L.ele + ' arrow'); }
     else if (L.kind === 'gear') {
       if (gearScore(L.slot, L.tier, L.affix) > 0) {
+        var was = hero.gear[L.slot] >= 0 ? { slot: L.slot, tier: hero.gear[L.slot], affix: hero.affix[L.slot] } : null;
         hero.gear[L.slot] = L.tier; hero.affix[L.slot] = L.affix || null; recalc(hero);
         got.push(gearName(L.slot, L.tier, L.affix));
+        if (was) stow(was);
+      } else if (findBuild('stash') || findBuild('bench')) {
+        stow({ slot: L.slot, tier: L.tier, affix: L.affix });
       } else {
         items.push({ id: nextId++, kind: 'gear', slot: L.slot, tier: L.tier, affix: L.affix, x: hero.x, y: hero.y, bob: Math.random() * 6 });
       }
@@ -942,19 +973,258 @@ function chopTurn(t) {
   fl(t.x, t.y, 'chop', '#d9b487');
   if (hero.chop.left > 0) return;
   world.tiles[t.y * W + t.x] = GRASS;
-  var got = 2 + (Math.random() < 0.4 ? 1 : 0);
+  var got = 3 + (Math.random() < 0.45 ? 1 : 0);
   hero.wood += got; hero.chop = null;
   fl(t.x, t.y, '+' + got + ' wood', '#d9b487');
   say('fells a tree (+' + got + ' wood)');
 }
 function buildTurn(spot) {
-  if (!hero.build || hero.build.x !== spot.x || hero.build.y !== spot.y)
-    hero.build = { x: spot.x, y: spot.y, left: BOAT_TURNS };
+  if (!hero.build || hero.build.kind !== 'boat' || hero.build.x !== spot.x || hero.build.y !== spot.y)
+    hero.build = { kind: 'boat', x: spot.x, y: spot.y, left: BOAT_TURNS };
   hero.build.left--; progress(); hero.spend(STAM.build);
   fl(hero.x, hero.y, 'build', '#d9b487');
   if (hero.build.left > 0) return;
   hero.wood -= BOAT_WOOD; hero.boat = 1; hero.boatHp = 3; hero.build = null;
   say('launches a boat'); fl(hero.x, hero.y, 'BOAT', '#9fd8e6'); stats.boats++;
+}
+
+/* ---------------- the pack ----------------
+   Everything carried has a weight, and weight is paid in wind: a burdened
+   hero sprints at double cost and gets its breath back slowly, an overloaded
+   one cannot run at all.  Gear it is not wearing rides in the pack until it
+   is stowed in a stash or broken down for scrap. */
+var PACK_SLOTS = 6, PACK_BASE = 34, PACK_LVL = 2;
+var WT = { wood: 2, potion: 2, scrap: 0.5, arrow: 0.25 };
+function gearWeight(g) { return 4 + g.tier; }
+function gearValue(g) { return g.tier * 10 + affixWorth(g.affix); }
+function heroLoad() {
+  var w = hero.wood * WT.wood + hero.potions * WT.potion + hero.scrap * WT.scrap + hero.arrows * WT.arrow;
+  for (var i = 0; i < hero.pack.length; i++) w += gearWeight(hero.pack[i]);
+  return Math.round(w);
+}
+function encumbrance() {                                    /* 0 light, 1 burdened, 2 overloaded */
+  var l = heroLoad();
+  return l > hero.cap * 1.4 ? 2 : l > hero.cap ? 1 : 0;
+}
+/* a piece broken down is worth its tier again in scrap, and an enchantment
+   survives the smashing as a couple of pieces more */
+function salvage(g, quiet) {
+  var n = 2 + g.tier * 2 + (g.affix ? 3 : 0);
+  hero.scrap += n; stats.salvaged++;
+  if (!quiet) {
+    fl(hero.x, hero.y, '+' + n + ' scrap', '#c3cbd8');
+    say('breaks down a ' + matsFor(g.slot)[g.tier].n + ' ' + SLOTS[g.slot].label);
+  }
+  return n;
+}
+function stow(g) {                                          /* keep it, or melt it down */
+  if (hero.pack.length < PACK_SLOTS && encumbrance() < 2) { hero.pack.push(g); return 'packed'; }
+  salvage(g, 1); return 'scrapped';
+}
+/* too laden and nowhere to put it: give up the least useful thing carried */
+function shedLoad() {
+  if (hero.pack.length) {
+    var wi = 0;
+    for (var i = 1; i < hero.pack.length; i++)
+      if (gearValue(hero.pack[i]) < gearValue(hero.pack[wi])) wi = i;
+    salvage(hero.pack.splice(wi, 1)[0]);
+    return 1;
+  }
+  if (hero.wood > 2) {
+    var drop = Math.min(hero.wood - 2, 4);
+    hero.wood -= drop;
+    var it = { id: nextId++, kind: 'wood', n: drop, known: 1, x: hero.x, y: hero.y, bob: Math.random() * 6 };
+    items.push(it); hero.ban[it.id] = tick + 220;             /* leave it be for a while */
+    fl(hero.x, hero.y, '-' + drop + ' wood', '#d9b487'); say('sets down ' + drop + ' wood');
+    return 1;
+  }
+  return 0;
+}
+
+/* ---------------- the camp ----------------
+   Three structures, each a pile of wood and a few turns of work.  None of
+   them survive the descent — but whatever is in the stash is hauled down and
+   unpacked on the next floor, which makes the stash the only thing on a
+   floor that outlives the floor. */
+var BUILDS = {
+  fire:  { n: 'campfire',  wood: 3, turns: 4, col: '#e0561f' },
+  stash: { n: 'stash',     wood: 4, turns: 5, col: '#b98a4e' },
+  bench: { n: 'workbench', wood: 5, turns: 6, col: '#9c7440' }
+};
+var BUILDKEYS = ['fire', 'stash', 'bench'];
+var FIRE_STAM = 5, FIRE_HEAL = 2, FIRE_FUEL = 30, FUEL_PER_WOOD = 10;
+function findBuild(kind) {
+  for (var i = 0; i < builds.length; i++) if (builds[i].kind === kind) return builds[i];
+  return null;
+}
+function buildAt(x, y) {
+  for (var i = 0; i < builds.length; i++) if (builds[i].x === x && builds[i].y === y) return builds[i];
+  return null;
+}
+function atBuild(kind) {
+  var b = findBuild(kind);
+  return b && dist(hero, b) <= 1 ? b : null;
+}
+/* somewhere to put the next structure: inland, off the tideline, clear of the
+   boss, and hard against whatever is already standing */
+function campSpot() {
+  var anchor = run.campAt || hero, near = !!run.campAt, bz = knownBoss();
+  var best = null, bd = 1e9, r0 = near ? 1 : 2, r1 = near ? 4 : 10;
+  for (var r = r0; r <= r1; r++) {
+    for (var a = -r; a <= r; a++) for (var s = -1; s <= 1; s += 2) {
+      var cs = [{ x: anchor.x + a, y: anchor.y + s * r }, { x: anchor.x + s * r, y: anchor.y + a }];
+      for (var ci = 0; ci < 2; ci++) {
+        var c = cs[ci];
+        if (c.x < 2 || c.y < 2 || c.x >= W - 2 || c.y >= H - 2) continue;
+        if (!walkable(c.x, c.y) || occupied(c.x, c.y) || buildAt(c.x, c.y)) continue;
+        if (islandAt(c.x, c.y) !== islandAt(hero.x, hero.y)) continue;
+        if (nextToWater(c.x, c.y)) continue;
+        if (bz && dist(bz, c) < 14) continue;
+        var d = Math.abs(c.x - hero.x) + Math.abs(c.y - hero.y);
+        if (d < bd) { bd = d; best = c; }
+      }
+    }
+    if (best) return best;
+  }
+  return best;
+}
+function siteTurn(spot, kind) {
+  var B = BUILDS[kind];
+  if (!hero.build || hero.build.kind !== kind || hero.build.x !== spot.x || hero.build.y !== spot.y)
+    hero.build = { kind: kind, x: spot.x, y: spot.y, left: B.turns };
+  hero.build.left--; progress(); hero.spend(STAM.build); hero.swing = 1;
+  fl(hero.x, hero.y, 'build', '#d9b487');
+  if (hero.build.left > 0) return;
+  hero.wood -= B.wood; hero.build = null;
+  var b = { id: nextId++, kind: kind, x: spot.x, y: spot.y, known: 1, bob: Math.random() * 6 };
+  if (kind === 'stash') b.hold = { gear: [], wood: 0, scrap: 0 };
+  if (kind === 'fire') b.fuel = FIRE_FUEL;
+  builds.push(b);
+  if (!run.campAt) run.campAt = { x: spot.x, y: spot.y };
+  stats.builds++;
+  say('★ raises a ' + B.n); fl(spot.x, spot.y, B.n.toUpperCase(), '#ffd166');
+}
+/* wood the hero is holding back for something it means to build or launch */
+function wantsBoat() {
+  if (hero.boat) return false;
+  var b = knownBoss();
+  if (b && offIsland(b)) return true;
+  return !!(run.rumor && islandAt(run.rumor.x, run.rumor.y) !== islandAt(hero.x, hero.y));
+}
+function woodReserve() {
+  var n = wantsBoat() ? BOAT_WOOD : 0;
+  for (var i = 0; i < BUILDKEYS.length; i++)
+    if (!findBuild(BUILDKEYS[i])) { n += BUILDS[BUILDKEYS[i]].wood; break; }
+  var f = findBuild('fire');
+  if (f && f.fuel < FIRE_FUEL / 2) n += 2;                    /* and a log or two for the fire */
+  return n;
+}
+/* what to raise next, and whether that means chopping first */
+function campPlan() {
+  if (hero.swimming || hero.sailing || hero.boat) return null;
+  var next = null;
+  if (!findBuild('bench') && hero.scrap >= reforgeCost(2)) next = 'bench';   /* scrap wants a home */
+  else for (var i = 0; i < BUILDKEYS.length; i++) if (!findBuild(BUILDKEYS[i])) { next = BUILDKEYS[i]; break; }
+  if (!next) return null;
+  var B = BUILDS[next], reserve = wantsBoat() ? BOAT_WOOD : 0;
+  if (hero.wood >= B.wood + reserve) {
+    var sp = campSpot();
+    return sp ? { kind: 'site', o: sp, site: next, why: 'raising a ' + B.n } : null;
+  }
+  if (hero.gear.axe < 0) return null;                        /* nothing to fell trees with */
+  var t = nearestTree(30);
+  return t ? { kind: 'tree', o: t, why: 'timber for a ' + B.n } : null;
+}
+
+/* ---------------- the workbench ----------------
+   Scrap is what the run's rejected loot is worth.  At a bench it buys the
+   only gear progression that isn't luck: a tier, an enchantment, or arrows. */
+var TEMPER_SCRAP = 14, REFORGE_WOOD = 2, TEMPER_WOOD = 2, FLETCH = 6;
+function reforgeCost(tier) { return 4 + 5 * tier; }
+function craftPick() {
+  var i, k;
+  var bestSlot = null, bestGain = 0;                         /* a tier on the piece that matters most */
+  for (i = 0; i < SLOTKEYS.length; i++) {
+    k = SLOTKEYS[i];
+    var t = hero.gear[k];
+    if (t < 0 || t >= MATS.length - 1) continue;
+    if (hero.scrap < reforgeCost(t + 1) || hero.wood < REFORGE_WOOD + (wantsBoat() ? BOAT_WOOD : 0)) continue;
+    var gain = k === 'sword' ? 4 : k === 'armor' ? 3 : k === 'bow' ? 2 : k === 'shield' ? 1.5 : 1;
+    if (gain > bestGain) { bestGain = gain; bestSlot = k; }
+  }
+  if (bestSlot) return { job: 'reforge', slot: bestSlot, why: 'reforging its ' + SLOTS[bestSlot].label };
+  for (i = 0; i < SLOTKEYS.length; i++) {                    /* then an enchantment on a bare piece */
+    k = SLOTKEYS[i];
+    if (hero.gear[k] < 0 || hero.affix[k]) continue;
+    if (hero.scrap < TEMPER_SCRAP || hero.wood < TEMPER_WOOD + (wantsBoat() ? BOAT_WOOD : 0)) continue;
+    return { job: 'temper', slot: k, why: 'tempering its ' + SLOTS[k].label };
+  }
+  if (hero.gear.bow >= 0 && hero.arrows <= QUIVER_MAX - FLETCH && hero.wood > woodReserve())
+    return { job: 'fletch', why: 'fletching arrows' };
+  return null;
+}
+function craftPlan() {
+  var b = findBuild('bench');
+  if (!b || banned(b.id)) return null;
+  var j = craftPick();
+  return j ? { kind: 'craft', o: b, job: j, why: j.why } : null;
+}
+function craftTurn() {
+  var job = craftPick();                                      /* the plan may be turns old by now */
+  if (!job) {                                                 /* nothing worth making right now */
+    var bn = findBuild('bench');
+    if (bn) hero.ban[bn.id] = tick + 40;
+    hero.lock = null; hero.lockT = 0; return;
+  }
+  hero.spend(STAM.build); progress(); hero.swing = 1;
+  if (job.job === 'fletch') {
+    hero.wood--;
+    var got = Math.min(FLETCH, QUIVER_MAX - hero.arrows); hero.arrows += got;
+    fl(hero.x, hero.y, '+' + got + ' arrows', '#e8d9a8'); say('fletches ' + got + ' arrows');
+  } else if (job.job === 'reforge') {
+    var t = Math.min(hero.gear[job.slot] + 1, matsFor(job.slot).length - 1);
+    hero.scrap -= reforgeCost(t); hero.wood -= REFORGE_WOOD;
+    hero.gear[job.slot] = t; recalc(hero); stats.crafts++;
+    var nm = gearName(job.slot, t, hero.affix[job.slot]);
+    fl(hero.x, hero.y, nm, matsFor(job.slot)[t].edge); say('★ reforges — ' + nm);
+  } else {
+    var af = affixFor(job.slot, Math.random, 1);
+    if (!af) return;
+    hero.scrap -= TEMPER_SCRAP; hero.wood -= TEMPER_WOOD;
+    hero.affix[job.slot] = af; recalc(hero); stats.crafts++;
+    fl(hero.x, hero.y, af, AFFIX[af].col);
+    say('★ tempers — ' + gearName(job.slot, hero.gear[job.slot], af));
+  }
+}
+
+/* ---------------- the stash ---------------- */
+function stashPlan() {
+  var st = findBuild('stash');
+  if (!st || banned(st.id)) return null;
+  var spare = hero.wood - woodReserve();
+  if (!hero.pack.length && spare <= 2 && hero.scrap <= 40) return null;
+  if (encumbrance() === 0 && hero.pack.length < PACK_SLOTS && spare <= 6 && hero.scrap <= 40) return null;
+  return { kind: 'stash', o: st, why: 'stowing its haul' };
+}
+function depositTurn(st) {
+  var n = hero.pack.length, keep = woodReserve();
+  while (hero.pack.length) st.hold.gear.push(hero.pack.pop());
+  if (hero.wood > keep) { st.hold.wood += hero.wood - keep; hero.wood = keep; }
+  var keepScrap = encumbrance() > 1 ? 0 : reforgeCost(MATS.length - 1);
+  if (hero.scrap > keepScrap) { st.hold.scrap += hero.scrap - keepScrap; hero.scrap = keepScrap; }
+  hero.spend(STAM.build); progress();
+  say(n ? 'stows ' + n + ' piece' + (n > 1 ? 's' : '') + ' in the stash' : 'stows supplies');
+  fl(hero.x, hero.y, 'stowed', '#b98a4e');
+  hero.lock = null; hero.lockT = 0;                           /* done here */
+}
+/* the descent: the camp is left standing, its stash hauled down as a cache */
+function packUpCamp() {
+  var st = findBuild('stash');
+  if (!st) { run.cache = null; return; }
+  var h = st.hold;
+  h.wood = Math.min(h.wood, BOAT_WOOD + 4);                   /* timber travels badly */
+  run.cache = (h.gear.length || h.wood || h.scrap) ? h : null;
+  if (run.cache) say('packs up the stash for the descent');
 }
 
 /* ---------------- hero brain ---------------- */
@@ -965,6 +1235,8 @@ function targetValid(lk) {
   if (!lk) return false;
   if (lk.kind === 'mob') return mobs.indexOf(lk.o) >= 0;
   if (lk.kind === 'item') return items.indexOf(lk.o) >= 0;
+  if (lk.kind === 'stash' || lk.kind === 'craft' || lk.kind === 'fire') return builds.indexOf(lk.o) >= 0;
+  if (lk.kind === 'site') return !buildAt(lk.o.x, lk.o.y) && hero.wood >= BUILDS[lk.site].wood;
   return !(hero.x === lk.o.x && hero.y === lk.o.y);           /* explore point */
 }
 function nearestOf(list, ok) {
@@ -1108,13 +1380,26 @@ function chooseTarget() {
     if (land) return { kind: 'spot', o: land, why: 'swimming for shore' };
   }
   if (hero.hp < hero.max * 0.45 && hero.potions > 0) return { kind: 'quaff' };
-  /* out of breath and nothing close: stand still until it comes back */
-  if (!hero.swimming) {
+  /* out of breath and nothing close: stand still until it comes back.  A
+     campfire is worth walking to — it gives back health as well as wind. */
+  if (!hero.swimming && !threatNear(7)) {
+    var fire = findBuild('fire');
+    if (fire && !fire.fuel && hero.wood < 1) fire = null;      /* burnt out, and nothing to feed it */
+    var spent = hero.stamFrac() < 0.2;
+    var hurt0 = hero.hp < hero.max * 0.55 && hero.potions === 0;
     if (hero.resting) {
-      if (hero.stamFrac() < 0.7 && !threatNear(7)) return { kind: 'rest', why: 'catching breath' };
+      if (hero.stamFrac() < 0.7 || (atBuild('fire') && fire && hero.hp < hero.max * 0.85)) {
+        if (fire && !atBuild('fire') && dist(hero, fire) <= 20 && !banned(fire.id))
+          return { kind: 'fire', o: fire, why: 'back to the fire' };
+        return { kind: 'rest', why: atBuild('fire') ? 'resting at the fire' : 'catching breath' };
+      }
       hero.resting = 0;
-    } else if (hero.stamFrac() < 0.2 && !threatNear(7)) {
-      hero.resting = 1; return { kind: 'rest', why: 'catching breath' };
+    } else if (spent || hurt0) {
+      hero.resting = 1;
+      if (fire && !atBuild('fire') && dist(hero, fire) <= 20 && !banned(fire.id))
+        return { kind: 'fire', o: fire, why: 'making for the fire' };
+      if (hurt0 && !spent) hero.resting = 0;                  /* no fire to go to; press on */
+      else return { kind: 'rest', why: 'catching breath' };
     }
   }
   var bss = knownBoss();
@@ -1166,16 +1451,26 @@ function chooseTarget() {
   var quiver = nearestOf(items, function (o) { return o.kind === 'arrows' && hero.arrows < QUIVER_MAX && far(o); });
   var rare = nearestOf(items, function (o) { return o.kind === 'ammo'; });
   var mob = nearestOf(mobs, function (o) { return !o.boss && far(o); });
-  var chest = nearestOf(items, function (o) { return o.kind === 'chest' && far(o); });
+  var chest = nearestOf(items, function (o) { return (o.kind === 'chest' || o.kind === 'cache') && far(o); });
+  var camped = findBuild('stash') || findBuild('bench');      /* junk is only worth stooping for once there is somewhere to put it */
+  var junk = camped ? nearestOf(items, function (o) {
+    return o.kind === 'gear' && gearScore(o.slot, o.tier, o.affix) <= 0 && far(o);
+  }) : null;
+  var stashJob = stashPlan(), craftJob = craftPlan(), campJob = campPlan();
 
   if (hero.hp < hero.max * 0.5 && potion && potion.d < 30) lk = { kind: 'item', o: potion.o, why: 'wounded — potion' };
   else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + gearName(gear.o.slot, gear.o.tier, gear.o.affix) };
+  else if (stashJob) lk = stashJob;
+  else if (craftJob) lk = craftJob;
+  else if (campJob && campJob.kind === 'site') lk = campJob;   /* wood in hand: put it up now */
   else if (rare && rare.d < 34) lk = { kind: 'item', o: rare.o, why: 'after a ' + rare.o.ele + ' arrow' };
   else if (quiver && quiver.d < 22 && hero.gear.bow >= 0 && hero.arrows < 8) lk = { kind: 'item', o: quiver.o, why: 'restocking arrows' };
   else if (boss && !reach(boss) && readyForBoss(boss) && boatPlan()) lk = boatPlan();
   else if (boss && !banned(boss.id) && readyForBoss(boss)) lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
   else if (mob && mob.d <= 18) lk = { kind: 'mob', o: mob.o, why: 'hunting a ' + mob.o.name };
-  else if (chest) lk = { kind: 'item', o: chest.o, why: 'looting a chest' };
+  else if (chest) lk = { kind: 'item', o: chest.o, why: chest.o.kind === 'cache' ? 'unpacking the cache' : 'looting a chest' };
+  else if (campJob) lk = campJob;                             /* spare time: go and fell timber */
+  else if (junk && junk.d < 20) lk = { kind: 'item', o: junk.o, why: 'scavenging for scrap' };
   else if (potion) lk = { kind: 'item', o: potion.o, why: 'fetching a potion' };
   else if (mob) lk = { kind: 'mob', o: mob.o, why: 'tracking a ' + mob.o.name };
   else if (boss && !banned(boss.id) && reach(boss)) lk = { kind: 'mob', o: boss, why: 'seeking ' + (boss.sname || boss.n) };
@@ -1271,6 +1566,7 @@ function heroTurn() {
     }
   }
   if (!hero.swimming && hero.hp < hero.max && tick % 6 === 0 && !threatNear(8)) hero.hp++;   /* breather */
+  if (encumbrance() > 1 && !findBuild('stash') && tick % 4 === 0) shedLoad();
 
   var tg = chooseTarget();
   hero.intent = tg.why || hero.intent;
@@ -1283,7 +1579,31 @@ function heroTurn() {
   }
   if (tg.kind === 'rest') {                                   /* exert stays 0: full second wind */
     hero.hist.length = 0; hero.lastProgress = tick;           /* standing still on purpose isn't dithering */
+    var fb2 = atBuild('fire');
+    if (fb2) {                                                /* a fire is worth more than bare ground */
+      if (fb2.fuel < FUEL_PER_WOOD && hero.wood > woodReserve()) {   /* feed it from the spare */
+        hero.wood--; fb2.fuel += FUEL_PER_WOOD;
+        fl(fb2.x, fb2.y, 'stoked', '#ff9d4d');
+      }
+      if (fb2.fuel > 0) {
+        fb2.fuel--;
+        hero.stam = Math.min(hero.stamMax, hero.stam + FIRE_STAM);
+        if (hero.hp < hero.max) {
+          hero.hp = Math.min(hero.max, hero.hp + FIRE_HEAL);
+          if (tick % 4 === 0) fl(hero.x, hero.y, '+' + FIRE_HEAL, '#8ef2a0');
+        }
+        if (!fb2.fuel) say('the fire burns down to embers');
+      }
+    }
     return;
+  }
+  if (tg.kind === 'site') {
+    if (hero.x === tg.o.x && hero.y === tg.o.y) { siteTurn(tg.o, tg.site); return; }
+  }
+  if (tg.kind === 'stash') { if (dist(hero, tg.o) <= 1) { depositTurn(tg.o); return; } }
+  if (tg.kind === 'craft') { if (dist(hero, tg.o) <= 1) { craftTurn(); return; } }
+  if (tg.kind === 'fire') {
+    if (dist(hero, tg.o) <= 1) { hero.lockT = 0; hero.lastProgress = tick; return; }
   }
   if (tg.kind === 'tree') {
     if (dist(hero, tg.o) <= 1) { chopTurn(tg.o); return; }
@@ -1305,6 +1625,8 @@ function heroTurn() {
   }
   if (tg.kind === 'mob' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { heroAttack(tg.o); return; }
   if (tg.kind === 'tree' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { chopTurn(tg.o); return; }
+  if (tg.kind === 'stash' && dist(hero, tg.o) <= 1) { depositTurn(tg.o); return; }
+  if (tg.kind === 'craft' && dist(hero, tg.o) <= 1) { craftTurn(); return; }
   if (!tryMove(hero, st.x, st.y)) { hero.lockT = Math.min(hero.lockT, 3); return; }
   hero.sailing = (hero.boat || hero.swimming) && tileAt(hero.x, hero.y) <= WATER ? 1 : 0;
   if (pickUp()) return;                                       /* stopped for something on the ground */
@@ -1336,6 +1658,7 @@ function pickUp() {
       var got = Math.min(it.n, QUIVER_MAX - hero.arrows); hero.arrows += got;
       fl(hero.x, hero.y, '+' + got + ' arrows', '#e8d9a8'); say('gathers ' + got + ' arrows'); progress(); took = 1;
     } else if (it.kind === 'wood') {
+      if (banned(it.id)) continue;                            /* it set this down itself */
       items.splice(i, 1); hero.wood += it.n;
       fl(hero.x, hero.y, '+' + it.n + ' wood', '#d9b487'); say('gathers driftwood (+' + it.n + ')'); progress(); took = 1;
     } else if (it.kind === 'ammo') {
@@ -1343,11 +1666,37 @@ function pickUp() {
       fl(hero.x, hero.y, it.ele + ' arrow!', ELEMENTS[it.ele].edge);
       say('★ finds ' + it.n + ' ' + it.ele + ' arrow' + (it.n > 1 ? 's' : '')); progress(); took = 1;
     } else if (it.kind === 'gear') {
-      if (gearScore(it.slot, it.tier, it.affix) <= 0) { hero.ban[it.id] = tick + 400; continue; }
+      var piece = { slot: it.slot, tier: it.tier, affix: it.affix };
+      if (gearScore(it.slot, it.tier, it.affix) <= 0) {        /* no upgrade — but it is still metal */
+        if (!findBuild('stash') && !findBuild('bench')) { hero.ban[it.id] = tick + 400; continue; }
+        if (hero.pack.length >= PACK_SLOTS && encumbrance() > 1) { hero.ban[it.id] = tick + 250; continue; }
+        items.splice(i, 1);
+        if (stow(piece) === 'packed') { fl(hero.x, hero.y, 'packed', '#b98a4e'); say('packs a ' + matsFor(it.slot)[it.tier].n + ' ' + SLOTS[it.slot].label); }
+        progress(); took = 1;
+      } else {
+        items.splice(i, 1);
+        var was2 = hero.gear[it.slot] >= 0 ? { slot: it.slot, tier: hero.gear[it.slot], affix: hero.affix[it.slot] } : null;
+        hero.gear[it.slot] = it.tier; hero.affix[it.slot] = it.affix || null; recalc(hero);
+        var nm = gearName(it.slot, it.tier, it.affix);
+        fl(hero.x, hero.y, nm, MATS[it.tier].edge); say('equips ' + nm); progress(); took = 1;
+        if (was2) stow(was2);
+      }
+    } else if (it.kind === 'cache') {
       items.splice(i, 1);
-      hero.gear[it.slot] = it.tier; hero.affix[it.slot] = it.affix || null; recalc(hero);
-      var nm = gearName(it.slot, it.tier, it.affix);
-      fl(hero.x, hero.y, nm, MATS[it.tier].edge); say('equips ' + nm); progress(); took = 1;
+      var hold = it.hold, gotc = [];
+      if (hold.wood) { hero.wood += hold.wood; gotc.push(hold.wood + ' wood'); }
+      if (hold.scrap) { hero.scrap += hold.scrap; gotc.push(hold.scrap + ' scrap'); }
+      for (var gi2 = 0; gi2 < hold.gear.length; gi2++) {
+        var G = hold.gear[gi2];
+        if (gearScore(G.slot, G.tier, G.affix) > 0) {
+          var was3 = hero.gear[G.slot] >= 0 ? { slot: G.slot, tier: hero.gear[G.slot], affix: hero.affix[G.slot] } : null;
+          hero.gear[G.slot] = G.tier; hero.affix[G.slot] = G.affix || null; recalc(hero);
+          gotc.push(gearName(G.slot, G.tier, G.affix));
+          if (was3) stow(was3);
+        } else stow(G);
+      }
+      say('★ unpacks the cache: ' + gotc.join(', ').slice(0, 20));
+      fl(hero.x, hero.y, 'CACHE', '#ffe9a8'); progress(); took = 1;
     }
   }
   return took;
@@ -1461,6 +1810,7 @@ function doTurn() {
     phase.t += TURN_MS;
     if (phase.t < phase.dur) return;
     if (phase.name === 'cleared') {
+      packUpCamp();
       run.floor++;
       hero.hp = Math.min(hero.max, hero.hp + Math.round(hero.max * 0.45));
       hero.stam = hero.stamMax;
@@ -2480,10 +2830,68 @@ function drawMob(m, sx, sy) {
   if (m.swing > 0) { ctx.strokeStyle = 'rgba(255,120,120,' + m.swing + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx + 12 + DX[m.face] * 10, sy + 12 + DY[m.face] * 10, 6, 0, 6.2832); ctx.stroke(); }
 }
 
+function drawBuild(b, sx, sy) {
+  var t = performance.now();
+  ctx.fillStyle = 'rgba(0,0,0,.30)';
+  ctx.beginPath(); ctx.ellipse(sx + 12, sy + 20, 9, 3.5, 0, 0, 6.2832); ctx.fill();
+  if (b.kind === 'fire') {
+    rect(ctx, sx + 4, sy + 15, 16, 3, '#6b4a2a'); rect(ctx, sx + 4, sy + 15, 16, 1, '#9c7440');
+    rect(ctx, sx + 7, sy + 18, 11, 2, '#5a3d22');
+    for (var s = 0; s < 5; s++) rect(ctx, sx + 1 + s * 5, sy + 18, 4, 4, s % 2 ? '#7d7f86' : '#5d6067');
+    if (!b.fuel) {                                             /* burnt out */
+      for (var em = 0; em < 4; em++) {
+        var eg = 0.3 + 0.3 * Math.abs(Math.sin(t / 700 + em + b.bob));
+        ctx.globalAlpha = eg; rect(ctx, sx + 7 + em * 3, sy + 14, 2, 2, '#9c3a14');
+      }
+      ctx.globalAlpha = 1; return;
+    }
+    var f = 0.62 + 0.38 * Math.sin(t / 105 + b.bob), hh = 8 + f * 5;
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = '#c0341a';
+    ctx.beginPath(); ctx.moveTo(sx + 6, sy + 16); ctx.quadraticCurveTo(sx + 12, sy + 16 - hh, sx + 18, sy + 16); ctx.fill();
+    ctx.fillStyle = '#f08020';
+    ctx.beginPath(); ctx.moveTo(sx + 8, sy + 16); ctx.quadraticCurveTo(sx + 12, sy + 16 - hh * 0.7, sx + 16, sy + 16); ctx.fill();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.moveTo(sx + 10, sy + 16); ctx.quadraticCurveTo(sx + 12, sy + 16 - hh * 0.38, sx + 14, sy + 16); ctx.fill();
+    ctx.globalAlpha = 0.5;                                     /* embers */
+    for (var e3 = 0; e3 < 3; e3++) {
+      var ph = (t / 900 + e3 * 0.33 + b.bob) % 1;
+      rect(ctx, sx + 9 + e3 * 3 + Math.sin(ph * 9 + e3) * 2, sy + 14 - ph * 14, 1, 1, '#ffd166');
+    }
+    ctx.globalAlpha = 1;
+  } else if (b.kind === 'stash') {
+    rect(ctx, sx + 2, sy + 9, 20, 12, '#7a5228'); rect(ctx, sx + 2, sy + 9, 20, 2, '#a97a3e');
+    rect(ctx, sx + 2, sy + 5, 20, 5, '#9c6a33'); rect(ctx, sx + 2, sy + 5, 20, 1, '#c99a54');
+    rect(ctx, sx + 2, sy + 13, 20, 2, '#5d3c1c');
+    rect(ctx, sx + 6, sy + 5, 2, 16, '#5d3c1c'); rect(ctx, sx + 16, sy + 5, 2, 16, '#5d3c1c');
+    rect(ctx, sx + 10, sy + 11, 4, 4, '#d9b45c'); rect(ctx, sx + 11, sy + 12, 2, 2, '#6b4a2a');
+    rect(ctx, sx + 4, sy + 2, 6, 3, '#8a6238'); rect(ctx, sx + 13, sy + 1, 7, 4, '#8a6238');  /* spilling over */
+  } else {
+    rect(ctx, sx + 1, sy + 10, 22, 4, '#8a6238'); rect(ctx, sx + 1, sy + 10, 22, 1, '#b78a54');
+    rect(ctx, sx + 3, sy + 14, 3, 8, '#6b4a2a'); rect(ctx, sx + 18, sy + 14, 3, 8, '#6b4a2a');
+    rect(ctx, sx + 6, sy + 16, 12, 2, '#5a3d22');
+    rect(ctx, sx + 4, sy + 6, 3, 4, '#9aa2ad'); rect(ctx, sx + 4, sy + 5, 3, 1, '#d6dae0');   /* anvil-ish */
+    rect(ctx, sx + 9, sy + 4, 2, 6, '#7d6f4e'); rect(ctx, sx + 8, sy + 3, 4, 2, '#9aa2ad');   /* hammer */
+    rect(ctx, sx + 15, sy + 6, 5, 4, '#63666d'); rect(ctx, sx + 15, sy + 6, 5, 1, '#8d9098');
+    rect(ctx, sx + 13, sy + 8, 2, 2, '#c3cbd8');
+  }
+}
+
 function drawItem(it, sx, sy) {
   var bob = Math.sin(performance.now() / 300 + it.bob) * 1.6;
   ctx.fillStyle = 'rgba(0,0,0,.25)';
   ctx.beginPath(); ctx.ellipse(sx + 12, sy + 20, 6, 2.5, 0, 0, 6.2832); ctx.fill();
+  if (it.kind === 'cache') {
+    var cb = sy + Math.sin(performance.now() / 300 + it.bob) * 1.2;
+    ctx.globalAlpha = 0.28 + 0.18 * Math.abs(Math.sin(performance.now() / 420 + it.bob));
+    ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(sx + 12, cb + 13, 12, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 1;
+    rect(ctx, sx + 3, cb + 10, 18, 11, '#8a6238'); rect(ctx, sx + 3, cb + 10, 18, 2, '#b78a54');
+    rect(ctx, sx + 5, cb + 6, 14, 5, '#a97a3e');
+    rect(ctx, sx + 9, cb + 4, 6, 3, '#c9b48a');
+    rect(ctx, sx + 3, cb + 15, 18, 2, '#5d3c1c'); rect(ctx, sx + 11, cb + 6, 2, 15, '#5d3c1c');
+    return;
+  }
   if (it.kind === 'chest') {
     if (it.ornate) {
       ctx.globalAlpha = 0.30 + 0.20 * Math.abs(Math.sin(performance.now() / 380 + it.bob));
@@ -2634,7 +3042,33 @@ function drawHUD() {
   }
   y += pips ? 17 : 4;
 
-  var ms = PW - 74, mx = X + 37;
+  var ld = heroLoad(), en = encumbrance();                    /* what it is carrying, and what that costs */
+  var encCol = en === 2 ? '#ff6b6b' : en === 1 ? '#e0c469' : '#7fa8c9';
+  ctx.fillStyle = '#6e7b91'; ctx.fillText('load', X + 14, y);
+  ctx.fillStyle = encCol; ctx.fillText(ld + '/' + hero.cap, X + 52, y);
+  ctx.fillStyle = '#6e7b91'; ctx.fillText('pack', X + 122, y);
+  ctx.fillStyle = hero.pack.length >= PACK_SLOTS ? '#e0c469' : '#e6ecf7';
+  ctx.fillText(hero.pack.length + '/' + PACK_SLOTS, X + 162, y);
+  bar(X + 14, y + 12, PW - 28, 4, ld / hero.cap, encCol);
+  y += 21;
+
+  ctx.fillStyle = '#6e7b91'; ctx.fillText('camp', X + 14, y);
+  for (var bk = 0; bk < BUILDKEYS.length; bk++) {
+    var bb = findBuild(BUILDKEYS[bk]), bxp = X + 52 + bk * 13;
+    rect(ctx, bxp, y + 1, 9, 8, bb ? BUILDS[BUILDKEYS[bk]].col : '#1b2230');
+    if (!bb) rect(ctx, bxp + 1, y + 2, 7, 6, '#10141c');
+  }
+  var stb = findBuild('stash');
+  if (stb) {
+    var held = stb.hold.gear.length;
+    ctx.fillStyle = held ? '#d9b45c' : '#4b5567';
+    ctx.fillText('\u00b7' + held, X + 94, y);
+  }
+  ctx.fillStyle = '#6e7b91'; ctx.fillText('scrap', X + 122, y);
+  ctx.fillStyle = hero.scrap ? '#c3cbd8' : '#3f4859'; ctx.fillText(String(hero.scrap), X + 162, y);
+  y += 16;
+
+  var ms = PW - 106, mx = X + 53;
   ctx.fillStyle = '#000'; ctx.fillRect(mx - 1, y - 1, ms + 2, ms + 2);
   ctx.drawImage(world.fog, mx, y, ms, ms);
   var sc = ms / W, k2;
@@ -2643,7 +3077,7 @@ function drawHUD() {
     if (!it.known) continue;
     ctx.fillStyle = it.kind === 'chest' ? (it.ornate ? '#fff4c2' : '#ffd166') : it.kind === 'potion' ? '#8ef2a0'
       : it.kind === 'arrows' ? '#e8d9a8' : it.kind === 'wood' ? '#d9b487'
-      : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : matsFor(it.slot)[it.tier].edge;
+      : it.kind === 'ammo' ? ELEMENTS[it.ele].edge : it.kind === 'cache' ? '#ffe9a8' : matsFor(it.slot)[it.tier].edge;
     ctx.fillRect(mx + it.x * sc, y + it.y * sc, 2, 2);
   }
   for (k2 = 0; k2 < mobs.length; k2++) {
@@ -2654,6 +3088,11 @@ function drawHUD() {
     if (mb.boss) { ctx.fillStyle = '#ff2d2d'; ctx.fillRect(mx + bx2 * sc - 2, y + by2 * sc - 2, 6, 6); }
     else { ctx.fillStyle = '#ff5c5c'; ctx.fillRect(mx + bx2 * sc, y + by2 * sc, 2, 2); }
     ctx.globalAlpha = 1;
+  }
+  for (k2 = 0; k2 < builds.length; k2++) {
+    var bd2 = builds[k2];
+    ctx.fillStyle = bd2.kind === 'fire' ? '#ff9d4d' : bd2.kind === 'stash' ? '#d9b45c' : '#b8c0cc';
+    ctx.fillRect(mx + bd2.x * sc - 1, y + bd2.y * sc - 1, 3, 3);
   }
   ctx.fillStyle = '#ffffff'; ctx.fillRect(mx + hero.x * sc - 1, y + hero.y * sc - 1, 4, 4);
   ctx.strokeStyle = '#2a3547'; ctx.strokeRect(mx - 1.5, y - 1.5, ms + 3, ms + 3);
@@ -2746,6 +3185,7 @@ function render(dt) {
     if (world.vis[idx] !== tick) rect(ctx, dx2, dy2, TILE, TILE, 'rgba(4,6,12,.58)');
   }
   var ents = [], a;
+  for (a = 0; a < builds.length; a++) ents.push({ y: builds[a].y, d: builds[a], k: 'b' });
   for (a = 0; a < items.length; a++) if (items[a].known) ents.push({ y: items[a].y, d: items[a], k: 'i' });
   for (a = 0; a < mobs.length; a++) {
     var mm3 = mobs[a];
@@ -2756,7 +3196,8 @@ function render(dt) {
   ents.sort(function (p, q) { return p.y - q.y; });
   for (a = 0; a < ents.length; a++) {
     var o = ents[a].d;
-    if (ents[a].k === 'i') drawItem(o, o.x * TILE + ox, o.y * TILE + oy);
+    if (ents[a].k === 'b') drawBuild(o, o.x * TILE + ox, o.y * TILE + oy);
+    else if (ents[a].k === 'i') drawItem(o, o.x * TILE + ox, o.y * TILE + oy);
     else if (ents[a].k === 'm') drawMob(o, o.px * TILE + ox, o.py * TILE + oy);
     else if (ents[a].k === 'g') {
       ctx.globalAlpha = 0.26;                                  /* a memory, not a sighting */
@@ -2812,6 +3253,14 @@ function render(dt) {
     ctx.globalAlpha = 1;
   }
   ctx.textAlign = 'left';
+  for (var bl = 0; bl < builds.length; bl++) {              /* firelight */
+    if (builds[bl].kind !== 'fire' || !builds[bl].fuel) continue;
+    var fb = builds[bl], fcx = fb.x * TILE + ox + 12, fcy = fb.y * TILE + oy + 14;
+    var fr = TILE * (2.6 + 0.18 * Math.sin(performance.now() / 260 + fb.bob));
+    var fg2 = ctx.createRadialGradient(fcx, fcy, 2, fcx, fcy, fr);
+    fg2.addColorStop(0, 'rgba(255,170,80,.34)'); fg2.addColorStop(1, 'rgba(255,150,60,0)');
+    ctx.fillStyle = fg2; ctx.beginPath(); ctx.arc(fcx, fcy, fr, 0, 6.2832); ctx.fill();
+  }
   var dark = FLOORDEF[clamp(run.floor - 1, 0, 4)].dark;
   var gr2 = ctx.createRadialGradient(VPW / 2, CH / 2, CH * 0.30, VPW / 2, CH / 2, CH * 0.85);
   gr2.addColorStop(0, 'rgba(0,0,0,0)'); gr2.addColorStop(1, 'rgba(0,0,0,' + dark + ')');
@@ -2835,9 +3284,10 @@ function render(dt) {
 /* ---------------- boot ---------------- */
 function boot() {
   buildBaseSheet();
-  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, wrecks: 0, killers: {} };
+  stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, wrecks: 0,
+           builds: 0, crafts: 0, salvaged: 0, killers: {} };
   log = []; tick = 0; shake = 0; run = null; hero = null;
-  mobs = []; items = []; floats = []; shots = []; fx = [];
+  mobs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   setPhase('play', 0);
   say('lunchquest — the hero needs no player');
   var sq = typeof location !== 'undefined' ? /seed=([0-9a-f]+)/i.exec(location.search || '') : null;
@@ -2850,10 +3300,18 @@ function boot() {
     hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
     recalc(hero); hero.hp = hero.max;
     hero.arrows = QUIVER_MAX; hero.ammo = { fire: 9, frost: 9, shock: 9 };
-    hero.wood = 20; hero.boat = 1; hero.boatHp = 3;
+    hero.wood = 20; hero.scrap = 60; hero.boat = 1; hero.boatHp = 3;
   }
   var fq = typeof location !== 'undefined' ? /floor=(\d)/.exec(location.search || '') : null;
   if (fq) { run.floor = clamp(+fq[1], 1, FLOORS); buildFloor(run.floor); }
+  if (typeof location !== 'undefined' && /camp/.test(location.search || '')) {
+    hero.wood = 30;                                           /* dev: a camp already standing */
+    for (var ck = 0; ck < BUILDKEYS.length; ck++) {
+      var csp = campSpot();
+      if (csp) { hero.build = null; siteTurn(csp, BUILDKEYS[ck]); while (hero.build) siteTurn(csp, BUILDKEYS[ck]); }
+    }
+    hero.scrap = 30; hero.pack = [{ slot: 'sword', tier: 1, affix: null }, { slot: 'armor', tier: 0, affix: 'sturdy' }];
+  }
 }
 /* dev: line the whole bestiary up next to the hero */
 function parade() {
@@ -2891,9 +3349,11 @@ requestAnimationFrame(frame);
 if (typeof window !== 'undefined') window.LQ = {
   hero: function () { return hero; }, mobs: function () { return mobs; }, items: function () { return items; },
   stats: function () { return stats; }, run: function () { return run; }, tick: function () { return tick; },
-  phase: function () { return phase; }, boss: theBoss
+  phase: function () { return phase; }, boss: theBoss,
+  builds: function () { return builds; }, load: heroLoad, enc: encumbrance
 };
 if (typeof module !== 'undefined') module.exports = {
-  state: function () { return { hero: hero, mobs: mobs, items: items, stats: stats, run: run, phase: phase, tick: tick, log: log }; }
+  state: function () { return { hero: hero, mobs: mobs, items: items, builds: builds, stats: stats, run: run, phase: phase, tick: tick, log: log }; },
+  load: heroLoad, enc: encumbrance
 };
 })();

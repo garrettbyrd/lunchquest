@@ -79,8 +79,57 @@ shooting at them, as long as they can afford it. The HUD marks a running turn wi
 a sprinting body kicks up dust behind it.
 
 **Catching breath.** With nothing threatening within seven tiles and stamina under a
-fifth, the hero stands still until it is back over 70%. It won't start a boss fight below
+fifth, the hero stands still until it is back over 70% — or walks to a campfire if it has
+built one, which gives back health too. What it is carrying changes all of these numbers;
+see [The pack](#the-pack). It won't start a boss fight below
 half stamina either, though once engaged the damage race decides things as before.
+
+## The pack
+
+Everything the hero carries has a weight, and weight is paid in wind. Wood is heavy (2
+apiece, so a boat's worth of timber is a real burden), potions and arrows less so, scrap
+barely anything. Carrying capacity starts at 34, grows with level, and grows again with
+the armour on its back — good armour is a harness as well as protection.
+
+Past capacity the hero is **burdened**: sprinting costs double and its breath comes back a
+point slower. Past 1.4x it is **overloaded** and cannot run at all. Nothing is ever
+forbidden outright; it just gets expensive, which is the same rule stamina already plays by.
+
+Gear it isn't wearing rides in a six-slot pack — including the piece it just replaced,
+which used to be dropped on the floor and forgotten. A piece can be **broken down for
+scrap** instead: 2 plus twice its tier, and 3 more if it was enchanted. That is what a
+run's rejected loot is actually worth, and it is nearly weightless, which makes smashing
+an ebony shield you can't use a genuine choice rather than a shrug.
+
+Before the hero has a camp it still ignores junk on the ground — there is nowhere to put
+it and nothing to spend scrap on. Build one and it starts scavenging.
+
+## The camp
+
+Three structures, each a pile of wood and a few turns of work, raised on whatever inland
+tile is nearest and clear of the boss:
+
+- **campfire** (3 wood) — resting beside it restores 5 stamina and 2 health a turn instead
+  of the usual trickle. It burns fuel to do it: 30 turns' worth from the wood it was built
+  with, 10 more per log fed in afterwards. Let it go out and it is a ring of embers until
+  the hero brings more timber.
+- **stash** (4 wood) — somewhere to put the pack down.
+- **workbench** (5 wood) — where scrap becomes gear.
+
+At the bench the hero **reforges** a worn piece up a tier for `4 + 5×tier` scrap and 2
+wood, **tempers** an unenchanted piece with a random affix for 14 scrap, or **fletches**
+6 arrows from a single log. Reforging is the only gear progression in the game that isn't
+luck, which gives a floor full of disappointing drops somewhere to go.
+
+None of it survives the descent — but **whatever is in the stash is hauled down and set
+out as a supply cache** on the next floor, and that is the point. A floor's camp is spent
+timber; a floor's stash is a head start on the floor below. Timber travels badly, so only
+a boat's worth comes with it; worked metal and spare gear all do.
+
+This puts wood in tension with itself. Six wood is a boat, which is how the hero reaches
+an island boss or an ornate chest. Twelve is a full camp. Both matter, and a floor rarely
+has time for everything — so the hero holds back exactly what it has a use for and stows
+the rest.
 
 ## Seeds
 
@@ -151,8 +200,8 @@ deepens its stamina pool, *swift* adds bow range. The hero values a piece by tie
 can beat a plain elven one.
 
 Chests roll real contents rather than a pile of gold: coin, potions, arrows, wood, gear,
-and the occasional elemental arrow. The hero equips what beats its kit and drops the rest
-on the ground. Ornate chests — the ones across the water — roll more, roll richer, and
+and the occasional elemental arrow. The hero equips what beats its kit and — once it has
+somewhere to put things — packs or breaks down the rest instead of leaving it lying. Ornate chests — the ones across the water — roll more, roll richer, and
 always contain a piece of gear.
 
 ## What the hero knows
@@ -175,9 +224,11 @@ across the water, that is what sends it looking for an axe.
 ## The brain
 
 Priority loop, re-decided every 145 ms turn, over known things only: hit an adjacent foe →
-swim for shore → quaff if wounded → catch breath if winded and unthreatened → run from a
-boss it isn't ready for → claim a gear upgrade → fight the boss if the math works → hunt
-trash → loot → chase a roar → explore the frontier → put to sea. Pathing is BFS over walkable tiles with a stamped
+swim for shore → quaff if wounded → fall back to the fire if winded or hurt → run from a
+boss it isn't ready for → claim a gear upgrade → stow a full pack → craft at the bench →
+raise a structure it has the wood for → fight the boss if the math works → hunt trash →
+loot → fell timber for the camp → scavenge for scrap → chase a roar → explore the
+frontier → put to sea. Pathing is BFS over walkable tiles with a stamped
 visit buffer, and it routes *around* a boss's aggro radius until the hero means to fight
 it — waking a boss early is how runs used to end at level 1.
 
@@ -190,6 +241,10 @@ Two failsafes stop the dithering that plain priority loops fall into: a chosen t
 for 16 turns without progress, that target gets banned for 90 turns and the hero walks
 away. A floor with no progress for 900 turns regenerates.
 
+Anything the hero commits to is decided again on arrival rather than trusted: a plan to
+reforge a blade is several turns old by the time it reaches the bench, and acting on the
+stale version of it is how the hero ended up with a sixth-tier sword that didn't exist.
+
 ## Always-on
 
 The simulation runs on `setInterval`, decoupled from `requestAnimationFrame`, so it keeps
@@ -201,5 +256,6 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 `window.LQ` exposes `hero()`, `mobs()`, `items()`, `stats()`, `run()`, `phase()`, and
 `boss()` for a live run. URL params for development: `?card=died|cleared|victory|title`
 freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
-ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, and `?parade=1`
-lines up the whole bestiary next to a frozen hero.
+ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, `?camp=1`
+starts with a camp already standing, and `?parade=1` lines up the whole bestiary next to a
+frozen hero.
