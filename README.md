@@ -160,6 +160,8 @@ when no axe has turned up. Boats don't survive the descent to the next floor —
 does — so each floor poses the problem again with a better kit.
 
 Monsters can't follow onto water, but archers and boss breath still reach you out there.
+Anything afloat — the hero's boat, an eel, a kraken — rides the actual surface height
+under it, so the whole sea bobs together.
 
 ## The water
 
@@ -178,6 +180,98 @@ every other turn until it drags itself ashore.
 Every archipelago has a few islets too small to be called islands. Each holds a guard or
 two and something worth the crossing — often an ornate chest, sometimes a mimic, which is
 a chest with teeth.
+
+## The sea itself
+
+The ocean is a solved fluid, not a scrolling texture. Every floor bakes a
+linear shallow-water problem over its own coastline and steps it four times a
+game turn:
+
+    dn/dt = -div(H u)     du/dt = -g grad(n)
+    =>  d2n/dt2 = g div(H grad n) - y dn/dt
+
+Leapfrog in time, five-point stencil in space, two cells to the tile — a
+320x320 grid, about 90,000 of them wet. It is kept in **divergence form** rather
+than collapsed to `c^2 lap(n)`, which is the whole trick: the wave speed is then
+`c = sqrt(gH)`, so depth is a real parameter and three behaviours fall out of the
+solver instead of being animated.
+
+**Refraction.** Swell runs faster over the deeps than the shallows, so a wavefront
+approaching a beach at an angle swings round to meet it square, exactly as real
+surf does.
+
+**Shoaling.** As `H` falls the same energy is carried by a slower, shorter wave, so
+it stands up and steepens on the way in.
+
+**Reflection.** A cell face that looks at land gets a coefficient of zero, which is
+precisely a no-flux wall. Coastlines bounce waves back without a line of code
+that knows what a coastline is.
+
+The face coefficients are baked once per floor, so the inner loop is nine array
+reads and a dozen flops with no branches at all: **2.8 ms per 145 ms turn, about
+2% of one core**, measured, with the whole sea live rather than a window around
+the camera.
+
+### What makes the wake
+
+A hull under way is a moving pressure source, laid down along the path it
+actually took during the turn so the track stays smooth however many frames were
+drawn. Everything else that disturbs water is the same call with different
+numbers: an arrow landing, a boat launching or splintering, something surfacing,
+anything that swims.
+
+The shape of the wake is then not art direction but arithmetic. The boat makes
+6.9 tiles/s; the sea is tuned to about 4.5 tiles/s over the deeps and 2.8 in the
+shallows, so the **Froude number** `Fr = v/sqrt(gH)` is 1.5 offshore and 2.5 inshore.
+Both are supercritical, and a supercritical source drags a Mach wedge behind it
+with half-angle `asin(1/Fr)` — 41 degrees out deep, 24 close in. Choosing a depth
+is choosing a wake angle.
+
+(Being *linear* shallow water, the model is non-dispersive: every wavelength
+travels at the same `c`. That is why this is a Mach wedge and not the constant
+19.5-degree Kelvin wedge a real deep-water hull leaves. It is the right trade —
+the honest version needs `w^2 = gk tanh(kH)` and a much more expensive solver,
+and at this resolution nobody could tell.)
+
+### Turning a height field into pixels
+
+Three quantities come out of the solver, and each one is already a shading term:
+
+- the **slope** is the surface normal, and the normal against a fixed light is the
+  glitter on the wave faces;
+- the **Laplacian** says whether the surface is focusing or spreading the light
+  passing through it, which is what a caustic is;
+- the **height** sets the length of the water column, and a longer column eats the
+  long wavelengths first — so troughs slide toward indigo and crests toward a
+  pale cyan. That is Beer-Lambert doing the hue work.
+
+A fourth, **steepness**, is the breaking criterion: past a threshold the crest goes
+to foam, which is roughly how real whitecaps are parameterised.
+
+All four collapse into one scalar per cell, and one scalar is an index into a
+ramp baked per floor — so the per-frame colour maths is a table lookup. There are
+two ramps, one per water type, each centred on the colour that tile already has,
+so a sea at rest looks exactly as it always did and the solver only ever pushes
+colour *away* from its own rest value.
+
+The whole layer is written into a 64x50 `ImageData` — one cell per twelve screen
+pixels — and blitted up with smoothing off: one `putImageData` and one
+`drawImage` a frame, 0.15 ms. Quantising a height field to 48 steps would be a
+compromise at high resolution. At twelve pixels a cell it is just what the game
+already looks like, and the chunky banding reads as water rather than as a
+shortcut.
+
+### Coming back to rest
+
+Damping is per tile type and the sea is genuinely dissipative: a unit impulse
+falls five orders of magnitude in half a minute, e-folding in about two seconds.
+The shallows eat energy faster than the deeps, which is what a surf zone does. A
+seven-tile sponge around the map edge absorbs whatever escapes, so the ocean
+never rings like a bathtub.
+
+Left alone the sea would therefore go to glass, which is dull and hides the
+refraction. `SEA_SWELL` drips a little wind chop in — three tiny random impulses
+a turn. Set it to zero for a dead-flat, perfectly settling ocean.
 
 ## The deep bosses
 
@@ -257,5 +351,8 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 `boss()` for a live run. URL params for development: `?card=died|cleared|victory|title`
 freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
 ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, `?camp=1`
-starts with a camp already standing, and `?parade=1` lines up the whole bestiary next to a
-frozen hero.
+starts with a camp already standing, `?seatest=1` sails a straight line across open water so
+the wake can be looked at, and `?parade=1` lines up the whole bestiary next to a frozen hero.
+
+`LQ.sea()` hands back the live height field, and `LQ.splash(x, y, amp, radius)` drops a
+stone in it.

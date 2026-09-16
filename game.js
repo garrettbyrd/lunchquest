@@ -344,8 +344,231 @@ function genWorld(seed) {
 function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : world.tiles[y * W + x]; }
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
 
+/* ---------------- the ocean ----------------
+   Linear shallow water, solved on a grid two cells to the tile.
+
+     dn/dt = -div(H u)      du/dt = -g grad(n)
+   =>  d2n/dt2 = g div(H grad n) - y dn/dt
+
+   Discretised with a leapfrog in time and a five-point stencil in space, and
+   kept in divergence form so that depth actually matters: the wave speed is
+   c = sqrt(gH), so swell runs faster over the deeps than over the shallows.
+   That one term buys refraction (wavefronts swing round to face the beach)
+   and shoaling (they stand up and steepen as they arrive) for free — nobody
+   has to animate either.
+
+   The face coefficients are baked once per floor, so the inner loop is nine
+   array reads and a dozen flops with no branches: ~0.5 ms for the whole
+   320x320 sea, thirty times a second.  A land face gets a coefficient of
+   zero, which is exactly a no-flux wall, so coastlines reflect by themselves. */
+var SEA_S = 2;                                              /* cells per tile */
+var GW = W * SEA_S, GH = H * SEA_S, CELLPX = TILE / SEA_S;
+var SEA_SUB = 4;                                            /* solver steps per game turn: ~27.6 Hz */
+var SEA_SWELL = 0.0016, SEA_SWELL_N = 3;                    /* ambient chop; 0 leaves the sea glass */
+/* (c*dt/dx)^2 per tile type.  dx is half a tile, so c = sqrt(k)*dx/dt tiles/s:
+   ~4.5 over the deeps, ~2.8 in the shallows.  The hero's boat makes 6.9
+   tiles/s, so its Froude number is 1.5 deep and 2.5 inshore — supercritical
+   both ways, which is what draws the V behind it, and a tighter V in close. */
+var SEA_K = [0.090, 0.035, 0, 0, 0, 0, 0, 0, 0];
+var SEA_DAMP = [0.9800, 0.9660, 1, 1, 1, 1, 1, 1, 1];       /* ~1.8s deep, ~1.1s in the surf zone */
+var SEA_SPONGE = 7;                                         /* absorbing rim, so the map edge doesn't ring */
+
+var seaCur = null, seaPrv, seaKE, seaKW, seaKN, seaKS, seaKC, seaDmp, seaCells;
+function oceanAlloc() {
+  var N = GW * GH;
+  seaCur = new Float32Array(N); seaPrv = new Float32Array(N);
+  seaKE = new Float32Array(N); seaKW = new Float32Array(N);
+  seaKN = new Float32Array(N); seaKS = new Float32Array(N);
+  seaKC = new Float32Array(N); seaDmp = new Float32Array(N);
+}
+/* bake the coefficients for this floor's coastline */
+var seaKK = null;
+function oceanBuild() {
+  if (!seaCur) oceanAlloc();
+  if (!seaKK) seaKK = new Float32Array(GW * GH);
+  seaCur.fill(0); seaPrv.fill(0);
+  var list = [], gx, gy, i, kk = seaKK;
+  for (gy = 0; gy < GH; gy++) {
+    var tr = ((gy / SEA_S) | 0) * W, gr = gy * GW;
+    for (gx = 0; gx < GW; gx++) kk[gr + gx] = SEA_K[world.tiles[tr + ((gx / SEA_S) | 0)]];
+  }
+  for (gy = 1; gy < GH - 1; gy++) for (gx = 1; gx < GW - 1; gx++) {
+    i = gy * GW + gx;
+    var k = kk[i];
+    if (k <= 0) { seaKC[i] = 0; continue; }
+    var ke = kk[i + 1], kw = kk[i - 1], kn = kk[i - GW], ks = kk[i + GW];
+    seaKE[i] = ke > 0 ? 0.5 * (k + ke) : 0;                  /* a face into land carries nothing */
+    seaKW[i] = kw > 0 ? 0.5 * (k + kw) : 0;
+    seaKN[i] = kn > 0 ? 0.5 * (k + kn) : 0;
+    seaKS[i] = ks > 0 ? 0.5 * (k + ks) : 0;
+    seaKC[i] = seaKE[i] + seaKW[i] + seaKN[i] + seaKS[i];
+    var d = SEA_DAMP[world.tiles[((gy / SEA_S) | 0) * W + ((gx / SEA_S) | 0)]];
+    var edge = Math.min(gx, gy, GW - 1 - gx, GH - 1 - gy) / SEA_S;
+    if (edge < SEA_SPONGE) d -= (1 - edge / SEA_SPONGE) * 0.14;   /* soak up what leaves */
+    seaDmp[i] = d;
+    list.push(i);
+  }
+  seaCells = new Int32Array(list);
+}
+function oceanStep() {
+  var c = seaCur, p = seaPrv, cells = seaCells, n, i, ci;
+  for (n = 0; n < cells.length; n++) {
+    i = cells[n]; ci = c[i];
+    var lap = seaKE[i] * c[i + 1] + seaKW[i] * c[i - 1] +
+              seaKN[i] * c[i - GW] + seaKS[i] * c[i + GW] - seaKC[i] * ci;
+    p[i] = (2 * ci - p[i] + lap) * seaDmp[i];
+  }
+  seaCur = p; seaPrv = c;
+}
+/* a disturbance centred on a tile position; negative pushes the surface down */
+function splash(tx, ty, amp, rad) {
+  if (!seaCur) return;
+  var cx = tx * SEA_S + (SEA_S - 1) * 0.5, cy = ty * SEA_S + (SEA_S - 1) * 0.5;
+  var r = Math.max(1, rad * SEA_S), r2 = r * r;
+  var x0 = Math.max(1, Math.floor(cx - r)), x1 = Math.min(GW - 2, Math.ceil(cx + r));
+  var y0 = Math.max(1, Math.floor(cy - r)), y1 = Math.min(GH - 2, Math.ceil(cy + r));
+  for (var gy = y0; gy <= y1; gy++) for (var gx = x0; gx <= x1; gx++) {
+    var i = gy * GW + gx;
+    if (seaKC[i] <= 0) continue;                            /* not water */
+    var dx = gx - cx, dy = gy - cy, d2 = dx * dx + dy * dy;
+    if (d2 > r2) continue;
+    seaCur[i] += amp * (1 - d2 / r2);                       /* a smooth bump, not a spike */
+  }
+}
+/* the surface height under a tile, for anything that should ride on it */
+function waveAt(tx, ty) {
+  if (!seaCur) return 0;
+  var gx = (tx * SEA_S + (SEA_S >> 1)) | 0, gy = (ty * SEA_S + (SEA_S >> 1)) | 0;
+  if (gx < 1 || gy < 1 || gx >= GW - 1 || gy >= GH - 1) return 0;
+  return seaCur[gy * GW + gx];
+}
+var seaLastX = 0, seaLastY = 0;
+function oceanTurn() {
+  if (!seaCells || !seaCells.length) return;
+  var wet = hero && hero.sailing;
+  if (!wet || Math.abs(hero.x - seaLastX) + Math.abs(hero.y - seaLastY) > 3) {
+    seaLastX = hero ? hero.x : 0; seaLastY = hero ? hero.y : 0;   /* a jump, not a voyage */
+  }
+  for (var s = 1; s <= SEA_SUB; s++) {
+    /* a hull under way is a moving pressure source — that is the whole wake.
+       Laying it down along the turn's path keeps the track smooth however
+       many frames happened to be drawn. */
+    if (wet) {
+      var u = s / SEA_SUB;
+      splash(seaLastX + (hero.x - seaLastX) * u, seaLastY + (hero.y - seaLastY) * u,
+             hero.boat ? -0.0038 : -0.0018, hero.boat ? 1.0 : 0.7);
+    }
+    oceanStep();
+  }
+  if (hero) { seaLastX = hero.x; seaLastY = hero.y; }
+  for (var q = 0; q < SEA_SWELL_N && SEA_SWELL > 0; q++) {     /* wind, roughly */
+    var ci = seaCells[(Math.random() * seaCells.length) | 0];
+    var gx = ci % GW, gy = (ci - gx) / GW;
+    splash(gx / SEA_S, gy / SEA_S, (Math.random() - 0.5) * 2 * SEA_SWELL, 1.4);
+  }
+}
+
+/* ---------------- the look of it ----------------
+   Two things decide a water cell's colour, and both come straight out of the
+   solver.  The surface slope gives a normal, and the normal against a fixed
+   light is the glitter.  The Laplacian says whether the surface is focusing
+   or spreading the light beneath it, which is what caustics are.  Height
+   itself only shifts the body colour: a deeper column absorbs the long
+   wavelengths first, so troughs go indigo and crests go pale cyan.
+
+   All of it collapses to one scalar per cell, and one scalar is an index into
+   a baked ramp — so the per-frame colour maths is a table lookup.  Quantising
+   to 48 steps would be a compromise at high resolution; at twelve screen
+   pixels per cell it is just what the game already looks like. */
+var RAMP_N = 48, seaRamp = null;
+var LIGHTX = -0.55, LIGHTY = -0.83;                         /* from over the hero's shoulder */
+var SH_LIT = 9.0, SH_STEEP = 4.0, SH_ETA = 1.3, SH_CAU = 5.0, SH_FOAM = 1.4, FOAM_T = 0.055;
+var SEA_BASE_A = 34, SEA_GAIN = 280, SEA_MAX_A = 184;
+
+var SEA_FALLBACK = [[18, 40, 63], [29, 91, 145]];           /* the unlit tilesheet blues */
+function sampleSheet(cv, row) {                             /* average a tile row's colour */
+  var d = null;
+  try { d = cv.getContext('2d').getImageData(2, row * TILE + 2, TILE - 4, TILE - 4).data; }
+  catch (e) { d = null; }
+  if (!d || !d.length) return SEA_FALLBACK[row] || SEA_FALLBACK[1];
+  var r = 0, gr = 0, b = 0, n = d.length / 4;
+  for (var i = 0; i < d.length; i += 4) { r += d[i]; gr += d[i + 1]; b += d[i + 2]; }
+  return [r / n, gr / n, b / n];
+}
+/* one ramp per water type, each centred on the colour that tile already has —
+   a calm sea then reads exactly as it did before, and the solver only ever
+   pushes the colour away from its own rest value.  Down the ramp the column
+   is deeper, so the long wavelengths go first and it slides to indigo; up the
+   ramp it thins toward a pale cyan and finally breaks into foam. */
+function rampInto(out, base, off) {
+  var lo = [base[0] * 0.46, base[1] * 0.52, base[2] * 0.80];
+  var hi = [base[0] * 0.50 + 150 * 0.50, base[1] * 0.46 + 205 * 0.54, base[2] * 0.46 + 232 * 0.54];
+  for (var i = 0; i < RAMP_N; i++) {
+    var t = i / (RAMP_N - 1), a, b, u;
+    if (t < 0.5) { a = lo; b = base; u = t * 2; }
+    else { a = base; b = hi; u = (t - 0.5) * 2; }
+    var r = a[0] + (b[0] - a[0]) * u, g2 = a[1] + (b[1] - a[1]) * u, bl = a[2] + (b[2] - a[2]) * u;
+    if (t > 0.92) { var f = (t - 0.92) / 0.08; r += (244 - r) * f; g2 += (251 - g2) * f; bl += (255 - bl) * f; }
+    out[off + i * 3] = clamp(r, 0, 255) | 0;
+    out[off + i * 3 + 1] = clamp(g2, 0, 255) | 0;
+    out[off + i * 3 + 2] = clamp(bl, 0, 255) | 0;
+  }
+}
+function oceanRamp(floor) {
+  var cv = sheetFor(floor);
+  seaRamp = new Uint8Array(RAMP_N * 3 * 2);
+  rampInto(seaRamp, sampleSheet(cv, DEEP), 0);
+  rampInto(seaRamp, sampleSheet(cv, WATER), RAMP_N * 3);
+}
+
+var seaCv = null, seaImg = null, SEA_BW = 64, SEA_BH = 50;
+function drawOcean(ox, oy) {
+  if (!seaCells || !seaCells.length || !seaRamp) return;
+  if (!seaCv) {
+    seaCv = newCanvas(SEA_BW, SEA_BH);
+    seaImg = seaCv.getContext('2d').createImageData(SEA_BW, SEA_BH);
+  }
+  /* the cell column that the left edge of the viewport falls in */
+  var gx0 = Math.max(1, Math.floor((-ox) / CELLPX) - 1);
+  var gy0 = Math.max(1, Math.floor((-oy) / CELLPX) - 1);
+  var bw = Math.min(SEA_BW, GW - 1 - gx0), bh = Math.min(SEA_BH, GH - 1 - gy0);
+  if (bw <= 0 || bh <= 0) return;
+  var px = seaImg.data, c = seaCur, ramp = seaRamp;
+  for (var by = 0; by < bh; by++) {
+    var gy = gy0 + by, row = gy * GW, trow = ((gy / SEA_S) | 0) * W, orow = by * SEA_BW;
+    for (var bx = 0; bx < bw; bx++) {
+      var gx = gx0 + bx, i = row + gx, o = (orow + bx) << 2;
+      if (seaKC[i] <= 0) { px[o + 3] = 0; continue; }        /* land */
+      var ti = trow + ((gx / SEA_S) | 0);
+      if (!world.seen[ti]) { px[o + 3] = 0; continue; }      /* never looked at */
+      var eta = c[i];
+      var sx = (c[i + 1] - c[i - 1]) * 0.5, sy = (c[i + GW] - c[i - GW]) * 0.5;
+      var lap = c[i + 1] + c[i - 1] + c[i + GW] + c[i - GW] - 4 * eta;
+      var lit = -(sx * LIGHTX + sy * LIGHTY);
+      var steep = (sx < 0 ? -sx : sx) + (sy < 0 ? -sy : sy);
+      var sh = 0.5 + SH_LIT * lit + SH_STEEP * steep + SH_ETA * eta - SH_CAU * lap;
+      if (steep > FOAM_T) sh += (steep - FOAM_T) * SH_FOAM;
+      var idx = (sh * RAMP_N) | 0;
+      if (idx < 0) idx = 0; else if (idx >= RAMP_N) idx = RAMP_N - 1;
+      var a = SEA_BASE_A + Math.abs(sh - 0.5) * SEA_GAIN;
+      if (a > SEA_MAX_A) a = SEA_MAX_A;
+      if (world.vis[ti] !== tick) a *= 0.42;                 /* remembered, not seen */
+      var r3 = (world.tiles[ti] === WATER ? RAMP_N + idx : idx) * 3;
+      px[o] = ramp[r3]; px[o + 1] = ramp[r3 + 1]; px[o + 2] = ramp[r3 + 2]; px[o + 3] = a;
+    }
+    for (var bx2 = bw; bx2 < SEA_BW; bx2++) px[((orow + bx2) << 2) + 3] = 0;
+  }
+  for (var by2 = bh; by2 < SEA_BH; by2++)
+    for (var bx3 = 0; bx3 < SEA_BW; bx3++) px[(((by2 * SEA_BW) + bx3) << 2) + 3] = 0;
+  var g = seaCv.getContext('2d');
+  g.putImageData(seaImg, 0, 0);
+  ctx.drawImage(seaCv, 0, 0, SEA_BW, SEA_BH,
+                gx0 * CELLPX + ox, gy0 * CELLPX + oy, SEA_BW * CELLPX, SEA_BH * CELLPX);
+}
+
 /* ---------------- state ---------------- */
 var hero, mobs, items, builds, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
+var seatesting = 0, seaLap = 0;
 
 function say(m) { log.push(m); if (log.length > 6) log.shift(); }
 function fl(x, y, txt, col) { floats.push({ x: x, y: y, txt: txt, col: col, t: 0 }); }
@@ -507,6 +730,7 @@ function buildFloor(floor) {
   world = w || genWorld(12345);
   sheet = sheetFor(floor);
   applyRecipe(world.mini, FLOORDEF[clamp(floor - 1, 0, FLOORDEF.length - 1)].recipe);
+  oceanBuild(); oceanRamp(floor);
   var rnd = world.rnd;
   mobs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   world.home = world.islands[0].id;
@@ -776,6 +1000,7 @@ function applyElement(ele, x, y, hit, dmg, byHero) {
 function fireShot(from, to, spec) {
   var r = traceShot(from.x, from.y, to.x, to.y, spec.range);
   shots.push({ x0: from.x, y0: from.y, x1: r.x, y1: r.y, t: 0, kind: spec.kind, col: spec.col });
+  if (tileAt(r.x, r.y) <= WATER) splash(r.x, r.y, 0.030, 1.3);
   if (!r.hit) { if (spec.ele && ELEMENTS[spec.ele].fx === 'blast') applyElement(spec.ele, r.x, r.y, null, spec.dmg, spec.byHero); return null; }
   if (r.hit === hero) hurtHero(Math.max(1, spec.dmg - hero.def), from);
   else damageMob(r.hit, Math.max(1, spec.dmg - r.hit.def), spec.byHero);
@@ -834,6 +1059,7 @@ function hurtHero(dmg, src) {
     fl(hero.x, hero.y, 'hull!', '#d9b487');
     if (hero.boatHp <= 0) {
       hero.boat = 0; hero.swimming = 1; shake = Math.max(shake, 8);
+      splash(hero.x, hero.y, 0.11, 3.2);                       /* the hull lets go */
       say('the boat splinters — swimming!'); fl(hero.x, hero.y, 'WRECKED', '#ff6b6b'); stats.wrecks++;
     }
   }
@@ -854,6 +1080,7 @@ function tryMove(e, dx, dy) {
   if (e === hero ? !heroPass(nx, ny) : !mobCanEnter(e, nx, ny)) return false;
   e.x = nx; e.y = ny;
   e.face = dy < 0 ? 0 : dy > 0 ? 2 : dx > 0 ? 1 : 3;
+  if (e !== hero && tileAt(nx, ny) <= WATER) splash(nx, ny, e.boss ? -0.022 : -0.007, e.boss ? 2.0 : 1.0);
   if (e.exert < 1) e.exert = 1;                               /* a walk is not a rest */
   return true;
 }
@@ -985,6 +1212,7 @@ function buildTurn(spot) {
   fl(hero.x, hero.y, 'build', '#d9b487');
   if (hero.build.left > 0) return;
   hero.wood -= BOAT_WOOD; hero.boat = 1; hero.boatHp = 3; hero.build = null;
+  splash(spot.x, spot.y, 0.055, 2.2);                         /* she takes the water */
   say('launches a boat'); fl(hero.x, hero.y, 'BOAT', '#9fd8e6'); stats.boats++;
 }
 
@@ -1712,6 +1940,7 @@ function spawnMinion(near) {
     if (wet ? tileAt(x, y) > WATER : !walkable(x, y)) continue;
     var T = wet ? SEATYPES[Math.random() * SEATYPES.length | 0] : MTYPES[clamp(1 + (Math.random() * 2 | 0), 0, 3)];
     spawnMob(T, { x: x, y: y }, run.floor, { wake: 1, seenT: visibleAt(x, y) ? tick : undefined, lx: x, ly: y });
+    if (wet) splash(x, y, 0.075, 2.4);                        /* something comes up */
     fl(x, y, wet ? 'surfaces' : 'risen', wet ? '#9fe6ff' : '#c6a3ff');
     return;
   }
@@ -1796,6 +2025,12 @@ function heroDied() {
 
 function doTurn() {
   tick++;
+  if (seatesting) {
+    if (tileAt(hero.x + 1, hero.y) <= WATER) hero.x++; else hero.x = seaLap;
+    hero.sailing = 1; hero.intent = 'sailing (dev)';
+    updateVision(); oceanTurn();
+    return;
+  }
   if (phase.name === 'play' && tick % 130 === 0) {
     var bz = theBoss();
     if (bz && !knownMob(bz)) {                                /* a rumour, not a map pin */
@@ -1805,6 +2040,7 @@ function doTurn() {
       say('a distant roar rolls across the water');
     }
   }
+  oceanTurn();
   if (parading) return;
   if (phase.name !== 'play') {
     phase.t += TURN_MS;
@@ -1866,11 +2102,12 @@ function spaced(txt, cx, y, size, sp, col, font) {
 
 function drawHero(sx, sy) {
   var sail = hero.sailing && tileAt(hero.x, hero.y) <= WATER;
-  var y = sy + Math.sin(performance.now() / 260) * 0.8 + (sail ? Math.sin(performance.now() / 400) * 1.2 - 3 : 0);
+  var swell = sail ? waveBob(hero.x, hero.y) : 0;
+  var y = sy + Math.sin(performance.now() / 260) * 0.8 + (sail ? swell - 3 : 0);
   ctx.fillStyle = 'rgba(0,0,0,.28)';
   ctx.beginPath(); ctx.ellipse(sx + 12, sy + 21, 8, 3.5, 0, 0, 6.2832); ctx.fill();
   if (sail) {
-    var by = sy + 16 + Math.sin(performance.now() / 400) * 1.2;
+    var by = sy + 16 + swell;
     ctx.fillStyle = 'rgba(255,255,255,.30)';
     ctx.beginPath(); ctx.ellipse(sx + 12, by + 5, 13, 3.5, 0, 0, 6.2832); ctx.fill();
     ctx.fillStyle = '#6b4a2a';
@@ -2689,8 +2926,9 @@ function bossSprite(m, sx, sy) {
   var frame = ((now / 420 + m.x * 0.7) | 0) & 1;
   var cv = bossCanvas(m, frame, m.hurt > 0);
   var cx = sx + 12, ground = sy + 23, base = g.globalAlpha;
-  var bob = art.hover ? Math.sin(now / 300 + m.x) * 2 - 3 : 0;
   var wet = m.t && m.t.sea;
+  var bob = art.hover ? Math.sin(now / 300 + m.x) * 2 - 3 : 0;
+  if (wet) bob += waveBob(m.x, m.y);
   g.fillStyle = wet ? 'rgba(220,240,255,.28)' : 'rgba(0,0,0,.34)';
   g.beginPath(); g.ellipse(cx, ground - 1, cv.width * 0.42, wet ? 4 : 5, 0, 0, 6.2832); g.fill();
   if (m.shape === 'lich') {                                  /* spectral aura */
@@ -2716,6 +2954,7 @@ function bossSprite(m, sx, sy) {
 function drawMob(m, sx, sy) {
   if (m.boss) { bossSprite(m, sx, sy); return; }
   var t = m.t, wob = Math.sin(performance.now() / 200 + m.x * 1.3 + m.y) * 1.4;
+  if (t.sea || ((t.amph || t.fly) && tileAt(m.x, m.y) <= WATER)) sy += waveBob(m.x, m.y);
   ctx.fillStyle = 'rgba(0,0,0,.28)';
   ctx.beginPath(); ctx.ellipse(sx + 12, sy + 21, 7, 3, 0, 0, 6.2832); ctx.fill();
   var col = m.hurt > 0 ? '#ffffff' : t.col;
@@ -3150,6 +3389,8 @@ function drawCard() {
 /* sprites glide to their tile at a steady pace that fills most of the turn, so a
    step, a sprint and a charge all read as motion rather than a jump.  Anything
    farther than that is a teleport (a new floor) and snaps. */
+function waveBob(x, y) { return clamp(waveAt(x, y) * 110, -5, 5); }
+
 function smooth(e, dt) {
   if (e.tx !== e.x || e.ty !== e.y) {                       /* new destination: set the pace */
     e.tx = e.x; e.ty = e.y;
@@ -3184,6 +3425,7 @@ function render(dt) {
     ctx.drawImage(sheet, world.variant[idx] * TILE, world.tiles[idx] * TILE, TILE, TILE, dx2, dy2, TILE, TILE);
     if (world.vis[idx] !== tick) rect(ctx, dx2, dy2, TILE, TILE, 'rgba(4,6,12,.58)');
   }
+  drawOcean(ox, oy);
   var ents = [], a;
   for (a = 0; a < builds.length; a++) ents.push({ y: builds[a].y, d: builds[a], k: 'b' });
   for (a = 0; a < items.length; a++) if (items[a].known) ents.push({ y: items[a].y, d: items[a], k: 'i' });
@@ -3295,6 +3537,7 @@ function boot() {
   var q = typeof location !== 'undefined' && location.search ? /card=(\w+)/.exec(location.search) : null;
   if (q) { setPhase(q[1], 100000); phase.t = 42000; }          /* card preview for screenshots */
   if (typeof location !== 'undefined' && /parade/.test(location.search || '')) parade();
+  if (typeof location !== 'undefined' && /seatest/.test(location.search || '')) seaTest();
   if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
     hero.gear = { sword: 4, shield: 4, armor: 4, bow: 4, axe: 4 };
     hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
@@ -3313,6 +3556,24 @@ function boot() {
     hero.scrap = 30; hero.pack = [{ slot: 'sword', tier: 1, affix: null }, { slot: 'armor', tier: 0, affix: 'sturdy' }];
   }
 }
+/* dev: put the hero on a boat in open water and sail a straight line, so the
+   wake and the shading can be judged on something repeatable */
+function seaTest() {
+  mobs.length = 0; items.length = 0; builds.length = 0;
+  var best = null, bn = -1;
+  for (var y = 8; y < H - 8; y += 2) for (var x = 4; x < W - 60; x += 2) {
+    if (tileAt(x, y) > WATER) continue;
+    var n = 0;
+    while (n < 70 && tileAt(x + n, y) <= WATER) n++;
+    if (n > bn) { bn = n; best = { x: x, y: y }; }
+  }
+  if (!best) return;
+  seatesting = 1; seaLap = best.x;
+  hero.x = best.x; hero.y = best.y; hero.px = best.x; hero.py = best.y;
+  hero.boat = 1; hero.boatHp = 3; hero.sailing = 1; hero.face = 1;
+  cam = { x: hero.x * TILE - VPW / 2, y: hero.y * TILE - VPH / 2 };
+}
+
 /* dev: line the whole bestiary up next to the hero */
 function parade() {
   parading = 1;
@@ -3350,10 +3611,15 @@ if (typeof window !== 'undefined') window.LQ = {
   hero: function () { return hero; }, mobs: function () { return mobs; }, items: function () { return items; },
   stats: function () { return stats; }, run: function () { return run; }, tick: function () { return tick; },
   phase: function () { return phase; }, boss: theBoss,
-  builds: function () { return builds; }, load: heroLoad, enc: encumbrance
+  builds: function () { return builds; }, load: heroLoad, enc: encumbrance,
+  sea: function () { return { cur: seaCur, cells: seaCells.length, gw: GW, gh: GH }; }, splash: splash, waveAt: waveAt,
+  step: oceanStep
 };
 if (typeof module !== 'undefined') module.exports = {
   state: function () { return { hero: hero, mobs: mobs, items: items, builds: builds, stats: stats, run: run, phase: phase, tick: tick, log: log }; },
-  load: heroLoad, enc: encumbrance
+  load: heroLoad, enc: encumbrance,
+  sea: function () { return { cur: seaCur, cells: seaCells.length, gw: GW, gh: GH }; },
+  splash: splash, waveAt: waveAt, step: oceanStep, tileAt: tileAt,
+  render: render, seaTest: seaTest, doTurn: doTurn
 };
 })();
