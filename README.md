@@ -131,6 +131,79 @@ an island boss or an ornate chest. Twelve is a full camp. Both matter, and a flo
 has time for everything — so the hero holds back exactly what it has a use for and stows
 the rest.
 
+## The moral compass
+
+Two axes, `good` and `law`, each in [-1, 1] and carried for the length of a run. A hero
+starts with a small random lean — near the origin, but no two alike — and moves from there
+only by what it actually does. Every nudge is scaled by `1 - |value|`, so the first step
+away from neutral is easy and the last is nearly impossible: a hero can be pushed to the
+edge but never nailed there, and can always be argued back. A very slow decay means one bad
+afternoon doesn't define a run while a habit does.
+
+### What moves it
+
+Almost all of these are events the game already fired; the compass just reads them. The
+weights were set against **measured** per-run frequencies — `road` fires 66 times a run and
+`raider` 0.2 times, so they cannot be worth the same — with the aim that a run's worth of
+one habit is about a third of an axis: enough to cross a band, not enough to pin it.
+
+| deed | good | law |
+|---|---|---|
+| cut down a raider inside the fence | +0.12 | +0.02 |
+| kill something menacing a frightened villager | +0.10 | · |
+| pay the asking price | +0.038 | +0.010 |
+| watch a raid through and do nothing | −0.055 | · |
+| lead a chase in through the gate | −0.030 | · |
+| rob a stall | −0.10 | −0.13 |
+| kill a villager | −0.24 | −0.07 |
+| kill one that was already running | −0.36 | −0.07 |
+| raise a camp structure | · | +0.022 |
+| fell a tree inside the village | · | −0.060 |
+| keep to the road | · | +0.0020 |
+| walk away from its own plan | · | −0.020 |
+
+Indifference is the important one. Standing by while a raid runs its course is the only
+ungated road to evil, and a hero busy looting drifts there without ever deciding to.
+
+### What it changes
+
+**Good and evil decide who counts as prey.** Past −0.18 the hero starts robbing stalls; past
+−0.45 it hunts the stallholders, who turn out to be carrying the day's takings. Past +0.10 it
+goes looking for whatever is troubling the village and puts that above ordinary hunting.
+
+**Lawful and chaotic decide how it moves.** Commitment to a target scales with `law` — 60
+turns lawful, 30 chaotic — so a chaotic hero literally re-decides more, and the flip-flopping
+the anti-dither code was built to suppress becomes character instead of a bug. Curiosity
+runs the other way. A chaotic foot goes its own way on up to a tenth of its steps.
+
+And a lawful hero **follows roads**. That one is a real shortest path, not a nudge: a second
+pathfinder using Dial's buckets, where a made road costs one and open ground costs three, so
+it will take a road up to three times longer rather than cut across a field. Small integer
+weights mean the priority queue is four rotating buckets and it stays linear.
+
+### What it costs to be a villain
+
+Robbing and murder would otherwise be free loot, and every run would slide there. So each
+village keeps a **grudge**. Wary at 0.4, it stops dealing with the hero; angry at 0.7, the
+guards come for it on sight and everyone else runs. The grudge is per village and so resets
+with the floor, while the alignment that earned it does not — which is what keeps an evil run
+moving instead of ending in one dead village.
+
+### Does it actually diverge?
+
+The thing worth testing is whether runs differ, or whether every hero ends in the same
+corner. Over eight headless sessions (about 45 runs):
+
+| | share |
+|---|---|
+| True Neutral | 58% |
+| Chaotic / Lawful Neutral | 18% |
+| evil of some stripe | 15% |
+| good of some stripe | 9% |
+
+Seven of the nine alignments turn up. Most heroes are unremarkable, which is right; the ones
+that aren't got there by a run's worth of small decisions.
+
 ## Seeds
 
 Every run is one seed. It decides the island layout of all five floors, which four bosses
@@ -141,8 +214,9 @@ replayed seed gives you the same world and the same kit, not the same fight.
 
 ## Worldgen
 
-A 160x160 archipelago. Three to six island centres are scattered with a channel kept
-between them, and land is the union of their falloffs, so the water between islands is
+A 160x160 archipelago. Three or four island centres are scattered with a channel kept
+between them — fewer and larger than they used to be, because a village needs somewhere to
+stand — and land is the union of their falloffs, so the water between islands is
 genuinely deep. On top of that: fBm value noise (5 octaves) for elevation and a second
 field for moisture, giving water / sand / grass / meadow / forest / rock biomes. A
 connected-component flood fill catalogues every island (seeds that produce only one are
@@ -150,6 +224,64 @@ rejected and re-rolled), and trails are carved within each.
 
 The boss holds a different island about two thirds of the time, and every island past the
 first has an ornate chest on it. That is what the boat is for.
+
+## The village
+
+Every floor puts a village on the home island, far enough from where the hero lands that it
+has to be found. It is **carved into the tile map**, not drawn on top of it: log walls,
+plank floors, a door apiece, tilled plots with crops coming up, a well in the middle, and a
+fence with gateways left open. Seven tile types went in for it (farmland, crop, floor,
+wall, door, fence, well), which means sight, arrows and pathfinding all understand a
+village for free — a wall stops an eye and an arrow because it *is* a wall, not because
+anything was written about houses.
+
+Living in it are five kinds of villager, each with a trade and a tool: a **smith** with a
+hammer, a **fletcher** with a bow, a **herbalist** with a flask, **farmers** with hoes, and
+**guards** with spear and shield, a pair of whom stand at the gates. They are kept in their
+own list, so nothing that loops over the monsters ever has to ask whether the thing it
+found wants to kill you.
+
+### Why it doesn't all just die
+
+The obvious failure of putting friendlies and monsters on one island is that the island
+resolves — everything walks toward everything else and in five minutes there is one winner
+and a lot of corpses. Three rules stop that, and none of them is a wall:
+
+- **Villagers are anchored.** Each has a home tile and will not willingly cross the fence.
+  Frightened, they back away from the threat along whichever tile puts the most ground
+  between them without leaving the village; cornered, they swing.
+- **Guards hold a line rather than a grudge.** They close on anything that has come inside
+  the fence and stop dead at its edge. A guard will never chase a fleeing monster across
+  the island, which is what would otherwise strip the village of its defenders.
+- **Monsters aren't interested.** They have no aggro on villagers at all, and while idling
+  they specifically won't drift toward the huts. A monster only ever arrives because the
+  hero led it there, or because the floor rolled a **raider** — a single monster, rarely,
+  that goes for the villagers until something stops it.
+
+Measured over 12,000 turns: 13–19 raids, 0–1 villagers lost, population steady at five to
+eight. The village bleeds slowly if at all, and the hero can come back to it.
+
+## Trade
+
+Gold had sat in the HUD doing nothing since the first commit. Now a villager carries one
+thing it will part with and a price, and the hero buys when the thing is worth having and
+it has the coin:
+
+| who | sells | roughly |
+|---|---|---|
+| smith | blades, shields, armour near the floor's tier, sometimes enchanted | 60–400g |
+| fletcher | arrows, bows, the occasional elemental arrow | 38–400g |
+| herbalist | potions | 45g |
+| farmer | wood, scrap | 32–42g |
+
+The hero only buys what it would actually use — gear that beats its kit, arrows it has room
+for, wood it is short of, scrap only if it has a workbench to spend it at. Sell something
+and the stall is bare for 140 turns, so a village is a place to come back to rather than a
+shop to strip in one visit.
+
+Villagers sit in the same line-of-fire model as everything else, so an arrow that finds one
+hits it. What the hero does around a village is most of what shapes its character — see
+[The moral compass](#the-moral-compass).
 
 ## Boats and woodcraft
 
@@ -352,7 +484,8 @@ behind, so the view never lies. Unexpected exceptions are caught and the floor r
 freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero full
 ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, `?camp=1`
 starts with a camp already standing, `?seatest=1` sails a straight line across open water so
-the wake can be looked at, and `?parade=1` lines up the whole bestiary next to a frozen hero.
+the wake can be looked at, `?vill=1` drops the hero in the village square, and `?parade=1`
+lines up the whole bestiary next to a frozen hero.
 
 `LQ.sea()` hands back the live height field, and `LQ.splash(x, y, amp, radius)` drops a
-stone in it.
+stone in it. `LQ.npcs()` and `LQ.village()` expose the village.

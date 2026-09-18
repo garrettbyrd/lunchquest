@@ -37,8 +37,11 @@ function makeNoise(rnd) {
 var TILE = 24, W = 160, H = 160;
 var CW = 960, CH = 540, VPW = 716, VPH = 540;
 var DEEP = 0, WATER = 1, SAND = 2, GRASS = 3, TALL = 4, TREE = 5, ROCK = 6, PATH = 7, FLOWER = 8;
-var WALK = [0, 0, 1, 1, 1, 0, 0, 1, 1];
-var MINI = ['#12283f', '#1d5b91', '#d8c48c', '#3f8a3f', '#4fa04a', '#245227', '#7d7f86', '#b09a6d', '#5aa84e'];
+var FARM = 9, CROP = 10, FLOOR = 11, WALL = 12, DOOR = 13, FENCE = 14, WELL = 15;
+var NTILE = 16;
+var WALK = [0, 0, 1, 1, 1, 0, 0, 1, 1,  1, 1, 1, 0, 1, 0, 0];
+var MINI = ['#12283f', '#1d5b91', '#d8c48c', '#3f8a3f', '#4fa04a', '#245227', '#7d7f86', '#b09a6d', '#5aa84e',
+            '#6b4f31', '#6f8a3a', '#a2764a', '#7b5836', '#c9a06a', '#8a6a44', '#8d9098'];
 var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 var VARIANTS = 4, TURN_MS = 145, FLOORS = 5;
 
@@ -171,9 +174,10 @@ function rect(g, x, y, w, h, c) { g.fillStyle = c; g.fillRect(x, y, w, h); }
 function newCanvas(w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
 function buildBaseSheet() {
-  var cv = newCanvas(TILE * VARIANTS, TILE * 9), g = cv.getContext('2d'), rnd = mulberry32(0xC0FFEE);
-  var base = ['#12283f', '#1d5b91', '#d6c189', '#3d8a3f', '#48993f', '#245227', '#797b82', '#ab9468', '#3d8a3f'];
-  for (var t = 0; t < 9; t++) for (var v = 0; v < VARIANTS; v++) {
+  var cv = newCanvas(TILE * VARIANTS, TILE * NTILE), g = cv.getContext('2d'), rnd = mulberry32(0xC0FFEE);
+  var base = ['#12283f', '#1d5b91', '#d6c189', '#3d8a3f', '#48993f', '#245227', '#797b82', '#ab9468', '#3d8a3f',
+              '#6b4f31', '#6b4f31', '#a2764a', '#7b5836', '#7b5836', '#48993f', '#797b82'];
+  for (var t = 0; t < NTILE; t++) for (var v = 0; v < VARIANTS; v++) {
     var ox = v * TILE, oy = t * TILE, i, x, y;
     rect(g, ox, oy, TILE, TILE, base[t]);
     for (i = 0; i < 46; i++) {
@@ -211,6 +215,53 @@ function buildBaseSheet() {
       }
     } else if (t === PATH) {
       for (i = 0; i < 8; i++) rect(g, ox + (rnd() * (TILE - 3) | 0), oy + (rnd() * (TILE - 3) | 0), 2 + (rnd() * 2 | 0), 2, rnd() < 0.5 ? 'rgba(255,255,255,.14)' : 'rgba(70,50,25,.30)');
+    } else if (t === FARM || t === CROP) {
+      for (i = 0; i < 4; i++) {                                /* furrows */
+        rect(g, ox, oy + 2 + i * 6, TILE, 3, 'rgba(0,0,0,.20)');
+        rect(g, ox, oy + 1 + i * 6, TILE, 1, 'rgba(255,220,170,.10)');
+      }
+      for (i = 0; i < 14; i++) rect(g, ox + (rnd() * TILE | 0), oy + (rnd() * TILE | 0), 1, 1, 'rgba(40,24,10,.45)');
+      if (t === CROP) for (i = 0; i < 4; i++) {                 /* rows of shoots */
+        var crx = ox + 3 + i * 5, cry = oy + 3 + (rnd() * 4 | 0);
+        rect(g, crx, cry, 1, 9, '#5f8f34');
+        rect(g, crx - 1, cry + 2, 3, 1, '#7fbf4a'); rect(g, crx - 1, cry + 6, 3, 1, '#7fbf4a');
+        rect(g, crx - 1, cry - 1, 3, 2, '#d9c25a');             /* ear */
+      }
+    } else if (t === FLOOR) {
+      for (i = 0; i < 4; i++) {                                /* boards */
+        rect(g, ox, oy + i * 6, TILE, 1, 'rgba(60,36,18,.55)');
+        rect(g, ox, oy + i * 6 + 1, TILE, 1, 'rgba(255,220,180,.10)');
+      }
+      for (i = 0; i < 3; i++) rect(g, ox + 2 + (rnd() * (TILE - 4) | 0), oy + (rnd() * TILE | 0), 1, 1, 'rgba(40,24,10,.40)');
+    } else if (t === WALL || t === DOOR) {
+      for (i = 0; i < 4; i++) {                                /* stacked logs */
+        var ly = oy + i * 6;
+        rect(g, ox, ly, TILE, 5, i % 2 ? '#8a6038' : '#7b5836');
+        rect(g, ox, ly, TILE, 1, 'rgba(255,225,185,.16)');
+        rect(g, ox, ly + 4, TILE, 1, 'rgba(0,0,0,.34)');
+      }
+      if (t === DOOR) {
+        rect(g, ox + 4, oy + 3, 16, 21, '#4a3018');            /* the opening */
+        rect(g, ox + 5, oy + 4, 14, 20, '#5d3d20');
+        rect(g, ox + 5, oy + 4, 14, 1, 'rgba(0,0,0,.45)');
+        rect(g, ox + 11, oy + 4, 2, 20, 'rgba(0,0,0,.35)');
+        rect(g, ox + 15, oy + 13, 2, 2, '#d9b45c');            /* handle */
+      }
+    } else if (t === FENCE) {
+      for (i = 0; i < 6; i++) rect(g, ox + 1 + (rnd() * (TILE - 2) | 0), oy + 2 + (rnd() * 16 | 0), 1, 3, 'rgba(0,50,0,.30)');
+      rect(g, ox, oy + 8, TILE, 3, '#8a6238'); rect(g, ox, oy + 8, TILE, 1, '#b78a54');
+      rect(g, ox, oy + 15, TILE, 3, '#8a6238'); rect(g, ox, oy + 15, TILE, 1, '#b78a54');
+      rect(g, ox + 4, oy + 4, 3, 17, '#6b4a2a'); rect(g, ox + 4, oy + 4, 3, 1, '#9c7440');
+      rect(g, ox + 16, oy + 4, 3, 17, '#6b4a2a'); rect(g, ox + 16, oy + 4, 3, 1, '#9c7440');
+    } else if (t === WELL) {
+      for (i = 0; i < 6; i++) rect(g, ox + 1 + (rnd() * (TILE - 2) | 0), oy + 2 + (rnd() * 18 | 0), 1, 3, 'rgba(0,50,0,.25)');
+      rect(g, ox + 3, oy + 7, 18, 14, '#6f727a');              /* stone ring */
+      rect(g, ox + 3, oy + 7, 18, 2, '#9a9da6');
+      rect(g, ox + 6, oy + 10, 12, 9, '#1b2f45');              /* water */
+      rect(g, ox + 7, oy + 11, 10, 2, 'rgba(120,180,230,.30)');
+      for (i = 0; i < 5; i++) rect(g, ox + 3 + i * 4, oy + 9, 1, 12, 'rgba(0,0,0,.25)');
+      rect(g, ox + 4, oy + 1, 2, 8, '#6b4a2a'); rect(g, ox + 18, oy + 1, 2, 8, '#6b4a2a');
+      rect(g, ox + 3, oy, 18, 3, '#8a6238'); rect(g, ox + 3, oy, 18, 1, '#b78a54');
     }
   }
   baseSheet = cv;
@@ -255,9 +306,9 @@ function genWorld(seed) {
 
   /* scatter a few island centres, keeping them apart; land is the union of
      their falloffs, so the sea between them is genuinely deep */
-  var cores = [], want = 3 + (rnd() * 3 | 0);
-  for (var a = 0; a < want * 14 && cores.length < want; a++) {
-    var cx0 = 22 + rnd() * (W - 44), cy0 = 22 + rnd() * (H - 44), rr = 20 + rnd() * 20, ok = 1;
+  var cores = [], want = 3 + (rnd() * 2 | 0);
+  for (var a = 0; a < want * 18 && cores.length < want; a++) {
+    var cx0 = 26 + rnd() * (W - 52), cy0 = 26 + rnd() * (H - 52), rr = 27 + rnd() * 23, ok = 1;
     for (var b = 0; b < cores.length; b++) {
       if (Math.hypot(cores[b].x - cx0, cores[b].y - cy0) < cores[b].r + rr + 9) { ok = 0; break; }
     }
@@ -369,8 +420,8 @@ var SEA_SWELL = 0.0016, SEA_SWELL_N = 3;                    /* ambient chop; 0 l
    ~4.5 over the deeps, ~2.8 in the shallows.  The hero's boat makes 6.9
    tiles/s, so its Froude number is 1.5 deep and 2.5 inshore — supercritical
    both ways, which is what draws the V behind it, and a tighter V in close. */
-var SEA_K = [0.090, 0.035, 0, 0, 0, 0, 0, 0, 0];
-var SEA_DAMP = [0.9800, 0.9660, 1, 1, 1, 1, 1, 1, 1];       /* ~1.8s deep, ~1.1s in the surf zone */
+var SEA_K = [0.090, 0.035, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0];
+var SEA_DAMP = [0.9800, 0.9660, 1, 1, 1, 1, 1, 1, 1,  1, 1, 1, 1, 1, 1, 1];  /* ~1.8s deep, ~1.1s surf */
 var SEA_SPONGE = 7;                                         /* absorbing rim, so the map edge doesn't ring */
 
 var seaCur = null, seaPrv, seaKE, seaKW, seaKN, seaKS, seaKC, seaDmp, seaCells;
@@ -567,7 +618,7 @@ function drawOcean(ox, oy) {
 }
 
 /* ---------------- state ---------------- */
-var hero, mobs, items, builds, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
+var hero, mobs, npcs, items, builds, floats, shots, fx, log, cam, run, stats, tick, shake, phase, sheet, parading = 0, nextId = 1;
 var seatesting = 0, seaLap = 0;
 
 function say(m) { log.push(m); if (log.length > 6) log.shift(); }
@@ -619,6 +670,8 @@ function Hero() {
   this.wood = 0; this.scrap = 0; this.pack = [];
   this.boat = 0; this.boatHp = 0; this.sailing = 0; this.swimming = 0; this.chop = null; this.build = null;
   this.intent = 'descending'; this.lock = null; this.lockT = 0; this.resting = 0; this.ran = 0;
+  this.good = (Math.random() - 0.5) * 0.44;                 /* a lean, not a creed */
+  this.law = (Math.random() - 0.5) * 0.44;
   this.hist = []; this.lastProgress = 0; this.ban = {};
   recalc(this); this.hp = this.max; this.stam = this.stamMax;
 }
@@ -687,7 +740,9 @@ function recalc(h) {
 }
 function occupied(x, y) {
   if (hero && hero.x === x && hero.y === y) return true;
-  for (var i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return true;
+  var i;
+  for (i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return true;
+  for (i = 0; i < npcs.length; i++) if (npcs[i].x === x && npcs[i].y === y) return true;
   return false;
 }
 function islandAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? -1 : world.comp[y * W + x]; }
@@ -701,7 +756,7 @@ function freeSpot(rnd, from, minD, island) {
   var pool = island === undefined ? world.land : islandTiles(island);
   for (var t = 0; t < 500; t++) {
     var c = pool[rnd() * pool.length | 0], x = c % W, y = (c - x) / W;
-    if (occupied(x, y)) continue;
+    if (occupied(x, y) || !walkable(x, y)) continue;           /* the village may have built here */
     if (from && Math.abs(x - from.x) + Math.abs(y - from.y) < minD) continue;
     return { x: x, y: y };
   }
@@ -732,7 +787,7 @@ function buildFloor(floor) {
   applyRecipe(world.mini, FLOORDEF[clamp(floor - 1, 0, FLOORDEF.length - 1)].recipe);
   oceanBuild(); oceanRamp(floor);
   var rnd = world.rnd;
-  mobs = []; items = []; builds = []; floats = []; shots = []; fx = [];
+  mobs = []; npcs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   world.home = world.islands[0].id;
   var spot = freeSpot(rnd, null, 0, world.home);
   hero.x = spot.x; hero.y = spot.y; hero.px = spot.x; hero.py = spot.y;
@@ -779,6 +834,11 @@ function buildFloor(floor) {
     if (rnd() < 0.32) items.push({ id: nextId++, kind: 'chest', mimic: 1, loot: [], x: ic.x, y: ic.y, bob: rnd() * 6 });
     else items.push({ id: nextId++, kind: 'chest', ornate: rnd() < 0.5 ? 1 : 0, loot: rollLoot(floor, 1, rnd), x: ic.x, y: ic.y, bob: rnd() * 6 });
   }
+
+  /* a village on the home island, well away from where the hero lands */
+  world.village = carveVillage(rnd, world.home, hero);
+  populateVillage(rnd, floor);
+  oceanBuild();                                               /* walls and huts are land too */
 
   /* the floor's boss */
   var B = floor >= FLOORS ? LICH : run.plan[floor - 1];
@@ -837,6 +897,269 @@ function spawnMob(T, spot, floor, extra) {
   mobs.push(m);
   return m;
 }
+
+/* ---------------- villages ----------------
+   A village is carved straight into the tile map: log walls, plank floors, a
+   door apiece, tilled plots, a well, and a fence with gaps in it.  Laying it
+   out in the terrain rather than drawing it as objects means sight, arrows
+   and pathing all understand it for free — a wall stops an eye and an arrow
+   because it is a wall, not because anything special was written for houses. */
+var VILL_R = 11;                                            /* how far the village reaches */
+function setTile(x, y, t) {
+  if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
+  world.tiles[y * W + x] = t;
+  var g = world.mini.getContext('2d');
+  g.fillStyle = MINI[t]; g.fillRect(x, y, 1, 1);
+}
+/* is every tile of this rectangle plain, dry, buildable ground? */
+function clearFor(x0, y0, w, h) {
+  for (var y = y0; y < y0 + h; y++) for (var x = x0; x < x0 + w; x++) {
+    if (x < 2 || y < 2 || x >= W - 2 || y >= H - 2) return false;
+    var t = tileAt(x, y);
+    if (t !== GRASS && t !== TALL && t !== FLOWER && t !== PATH && t !== TREE) return false;
+  }
+  return true;
+}
+function hut(x0, y0, w, h, rnd) {
+  var x, y;
+  for (y = y0; y < y0 + h; y++) for (x = x0; x < x0 + w; x++) {
+    var edge = (x === x0 || x === x0 + w - 1 || y === y0 || y === y0 + h - 1);
+    setTile(x, y, edge ? WALL : FLOOR);
+  }
+  /* one door, on a side wall so it is reachable */
+  var side = rnd() * 4 | 0, dx, dy;
+  if (side === 0) { dx = x0 + 1 + (rnd() * (w - 2) | 0); dy = y0 + h - 1; }
+  else if (side === 1) { dx = x0 + 1 + (rnd() * (w - 2) | 0); dy = y0; }
+  else if (side === 2) { dx = x0; dy = y0 + 1 + (rnd() * (h - 2) | 0); }
+  else { dx = x0 + w - 1; dy = y0 + 1 + (rnd() * (h - 2) | 0); }
+  setTile(dx, dy, DOOR);
+  return { x: x0 + (w >> 1), y: y0 + (h >> 1), dx: dx, dy: dy, w: w, h: h, x0: x0, y0: y0 };
+}
+function pavePath(ax, ay, bx, by) {
+  var guard = 0;
+  while ((ax !== bx || ay !== by) && guard++ < 90) {
+    if (walkable(ax, ay) && tileAt(ax, ay) !== DOOR && tileAt(ax, ay) !== FLOOR &&
+        tileAt(ax, ay) !== FARM && tileAt(ax, ay) !== CROP) setTile(ax, ay, PATH);
+    if (Math.abs(bx - ax) > Math.abs(by - ay)) ax += bx > ax ? 1 : -1;
+    else ay += by > ay ? 1 : -1;
+  }
+}
+/* find somewhere roomy and inland, then build */
+function carveVillage(rnd, islandId, keepFrom) {
+  var pool = islandTiles(islandId), best = null, bd = -1, t;
+  for (t = 0; t < 900; t++) {
+    var c = pool[rnd() * pool.length | 0], cx = c % W, cy = (c - cx) / W;
+    if (keepFrom && Math.abs(cx - keepFrom.x) + Math.abs(cy - keepFrom.y) < 22) continue;
+    if (!clearFor(cx - 5, cy - 5, 11, 11)) continue;
+    var room = 0;                                            /* prefer the most open ground */
+    for (var ry = -VILL_R; ry <= VILL_R; ry += 2) for (var rx = -VILL_R; rx <= VILL_R; rx += 2) {
+      var tt = tileAt(cx + rx, cy + ry);
+      if (tt === GRASS || tt === TALL || tt === FLOWER || tt === PATH) room++;
+    }
+    if (room > bd) { bd = room; best = { x: cx, y: cy }; }
+    if (bd > 100) break;
+  }
+  if (!best) return null;
+
+  var vx = best.x, vy = best.y, huts = [], i;
+  setTile(vx, vy, WELL);                                     /* the well is the middle of things */
+  for (i = 0; i < 4; i++) setTile(vx + DX[i], vy + DY[i], PATH);
+
+  var want = 3 + (rnd() * 3 | 0);
+  for (var a = 0; a < 90 && huts.length < want; a++) {
+    var w = 4 + (rnd() * 3 | 0), h = 4 + (rnd() * 2 | 0);
+    var ang = rnd() * 6.2832, rad = 4 + rnd() * (VILL_R - 5);
+    var hx = Math.round(vx + Math.cos(ang) * rad) - (w >> 1);
+    var hy = Math.round(vy + Math.sin(ang) * rad) - (h >> 1);
+    if (!clearFor(hx - 1, hy - 1, w + 2, h + 2)) continue;
+    var ok = 1;
+    for (i = 0; i < huts.length; i++) {                      /* keep a lane between them */
+      var o = huts[i];
+      if (hx < o.x0 + o.w + 2 && hx + w + 2 > o.x0 && hy < o.y0 + o.h + 2 && hy + h + 2 > o.y0) { ok = 0; break; }
+    }
+    if (!ok) continue;
+    huts.push(hut(hx, hy, w, h, rnd));
+  }
+  if (!huts.length) return null;
+
+  for (i = 0; i < huts.length; i++) pavePath(huts[i].dx, huts[i].dy, vx, vy);
+
+  for (var f = 0; f < 2 + (rnd() * 2 | 0); f++) {             /* plots to work */
+    var fw = 4 + (rnd() * 3 | 0), fh = 3 + (rnd() * 2 | 0);
+    var fa = rnd() * 6.2832, fr = 5 + rnd() * (VILL_R - 4);
+    var fx = Math.round(vx + Math.cos(fa) * fr) - (fw >> 1);
+    var fy = Math.round(vy + Math.sin(fa) * fr) - (fh >> 1);
+    if (!clearFor(fx, fy, fw, fh)) continue;
+    for (var yy = fy; yy < fy + fh; yy++) for (var xx = fx; xx < fx + fw; xx++)
+      setTile(xx, yy, rnd() < 0.65 ? CROP : FARM);
+  }
+
+  var gate = [];                                             /* a fence, with ways through it */
+  for (var s = 0; s < 360; s += 5) {
+    var rr = VILL_R + 1.2, px = Math.round(vx + Math.cos(s * 0.01745) * rr), py = Math.round(vy + Math.sin(s * 0.01745) * rr);
+    if (!clearFor(px, py, 1, 1)) continue;
+    if (s % 90 < 12) { gate.push({ x: px, y: py }); continue; }   /* leave the gateways open */
+    setTile(px, py, FENCE);
+  }
+  return { x: vx, y: vy, r: VILL_R, huts: huts, gates: gate, anger: 0 };
+}
+
+
+/* ---------------- villagers ----------------
+   Friendly beings, kept in their own list so that nothing which loops over
+   `mobs` ever has to ask whether the thing it found wants to kill you.
+
+   The balance the village needs is that nothing converges: monsters must not
+   march on the huts, and villagers must not march out to meet them.  Three
+   rules do it.  Villagers are anchored to a home tile and will not willingly
+   leave the fence.  Guards defend a line — they close on anything inside the
+   village and stop dead at its edge rather than chasing across the island.
+   And monsters have no interest in villagers at all: they wander around the
+   fence, and only ever come in because the hero led them in, or because the
+   floor rolled a rare raider. */
+var NPCTYPES = [
+  { k: 'farmer',    hp: 18, atk: 2, def: 0, ev: 3, stam: 14, col: '#b9a06a', dark: '#6d5a2f', tool: 'hoe',   sells: 'goods'   },
+  { k: 'smith',     hp: 30, atk: 7, def: 2, ev: 3, stam: 22, col: '#b05a3a', dark: '#5f2c18', tool: 'hammer',sells: 'arms'    },
+  { k: 'fletcher',  hp: 22, atk: 4, def: 1, ev: 3, stam: 18, col: '#7f9b5a', dark: '#40532a', tool: 'bow',   sells: 'arrows'  },
+  { k: 'herbalist', hp: 18, atk: 2, def: 0, ev: 3, stam: 14, col: '#9a7fc0', dark: '#4c3a66', tool: 'flask', sells: 'potions' },
+  { k: 'guard',     hp: 46, atk: 10, def: 4, ev: 2, stam: 34, col: '#8d9098', dark: '#474a52', tool: 'spear', guard: 1 }
+];
+var FEAR_R = 6, GUARD_R = 8, VILL_SLACK = 3;
+
+function Npc(T, x, y, floor, vill) {
+  Being.call(this, x, y);
+  this.id = nextId++; this.t = T; this.npc = 1; this.name = T.k;
+  this.ev = T.ev; this.vill = vill; this.hx = x; this.hy = y;   /* where it belongs */
+  var sc = 1 + 0.45 * (floor - 1);
+  this.max = Math.round(T.hp * sc); this.hp = this.max;
+  this.atk = T.atk + Math.round((floor - 1) * 1.8);
+  this.def = T.def + (floor > 2 ? 1 : 0);
+  this.stamMax = T.stam; this.stam = this.stamMax; this.stamRegen = 2;
+  this.afraid = 0; this.wander = 0;
+}
+Npc.prototype = Object.create(Being.prototype);
+Npc.prototype.constructor = Npc;
+Npc.prototype.meleeCost = function () { return STAM.melee; };
+
+function npcAt(x, y) {
+  for (var i = 0; i < npcs.length; i++) if (npcs[i].x === x && npcs[i].y === y) return npcs[i];
+  return null;
+}
+function inVillage(o, slack) {
+  var v = world.village;
+  return !!v && Math.abs(o.x - v.x) + Math.abs(o.y - v.y) <= v.r + (slack || 0);
+}
+/* a villager dies quietly; the run remembers it happened */
+function hurtNpc(n, dmg, bySrc) {
+  n.hp -= dmg; n.hurt = 1; n.afraid = 24;
+  fl(n.x, n.y, '-' + dmg, '#ffd166');
+  if (n.hp > 0) return;
+  npcs.splice(npcs.indexOf(n), 1);
+  stats.villagers++;
+  var byHero = bySrc === hero;
+  if (byHero) { stats.murders++; moral(n.afraid > 0 ? 'fleeing' : 'murder');
+    say('☠ the ' + n.name + ' dies by your hand'); }
+  else say('a ' + n.name + ' is killed');
+  fl(n.x, n.y, byHero ? 'MURDER' : 'slain', '#ff6b6b');
+}
+function npcAttack(n, m) {
+  n.swing = 1;
+  n.face = m.x > n.x ? 1 : m.x < n.x ? 3 : m.y > n.y ? 2 : 0;
+  var dmg = Math.max(1, Math.round((n.atk + (Math.random() * 3 | 0)) * n.effort()) - m.def);
+  n.spend(n.meleeCost());
+  damageMob(m, dmg, 0);
+}
+/* the tile out of the four that puts the most ground between us and a threat,
+   without stepping outside the fence */
+function backAwayTo(n, thr) {
+  var best = null, bd = dist(n, thr);
+  for (var d = 0; d < 4; d++) {
+    var nx = n.x + DX[d], ny = n.y + DY[d];
+    if (!walkable(nx, ny) || occupied(nx, ny)) continue;
+    var v = world.village;
+    if (v && Math.abs(nx - v.x) + Math.abs(ny - v.y) > v.r) continue;
+    var dd = Math.abs(nx - thr.x) + Math.abs(ny - thr.y);
+    if (dd > bd) { bd = dd; best = { x: DX[d], y: DY[d] }; }
+  }
+  return best;
+}
+function npcTurn(n) {
+  var i, thr = null, td = 999, reach = n.t.guard ? GUARD_R : FEAR_R;
+  if (hostileVillage() && dist(n, hero) <= reach) {            /* the hero is the trouble now */
+    n.afraid = 20;
+    if (n.t.guard) {
+      if (dist(n, hero) <= 1) {
+        n.swing = 1; n.face = hero.x > n.x ? 1 : hero.x < n.x ? 3 : hero.y > n.y ? 2 : 0;
+        hurtHero(Math.max(1, Math.round((n.atk + (Math.random() * 3 | 0)) * n.effort()) - hero.def), n);
+        n.spend(n.meleeCost()); return;
+      }
+      var sg = stepToward(n.x, n.y, hero.x, hero.y, 700, null, landPass);
+      if (sg) tryMove(n, sg.x, sg.y);
+      return;
+    }
+    var run2 = backAwayTo(n, hero);
+    if (run2) { tryMove(n, run2.x, run2.y); return; }
+  }
+  for (i = 0; i < mobs.length; i++) {
+    var d = dist(n, mobs[i]);
+    if (d < td && d <= reach) { td = d; thr = mobs[i]; }
+  }
+  if (n.afraid > 0) n.afraid--;
+
+  if (n.t.guard) {
+    if (thr && td <= 1) { npcAttack(n, thr); return; }
+    /* hold the line: close only on what has come inside, never give chase */
+    if (thr && inVillage(thr, VILL_SLACK)) {
+      var st = stepToward(n.x, n.y, thr.x, thr.y, 700, null, landPass);
+      if (st) tryMove(n, st.x, st.y);
+      return;
+    }
+  } else if (thr) {
+    n.afraid = 20;
+    var away = backAwayTo(n, thr);
+    if (away) { tryMove(n, away.x, away.y); return; }
+    if (td <= 1) { npcAttack(n, thr); return; }               /* cornered */
+    return;
+  }
+
+  /* nothing pressing: drift around the place it belongs */
+  var hd = Math.abs(n.x - n.hx) + Math.abs(n.y - n.hy);
+  if (hd > (n.t.guard ? 5 : 3)) {
+    var sh = stepToward(n.x, n.y, n.hx, n.hy, 500, null, landPass);
+    if (sh) tryMove(n, sh.x, sh.y);
+    return;
+  }
+  if (Math.random() < 0.28) {
+    var k = Math.random() * 4 | 0, tx = n.x + DX[k], ty = n.y + DY[k];
+    var v2 = world.village;
+    if (v2 && Math.abs(tx - v2.x) + Math.abs(ty - v2.y) <= v2.r) tryMove(n, DX[k], DY[k]);
+  }
+}
+/* people the village needs, put where they work */
+function populateVillage(rnd, floor) {
+  var v = world.village;
+  if (!v) return;
+  var want = 4 + (rnd() * 3 | 0), placed = 0, roles = ['smith', 'fletcher', 'herbalist'];
+  for (var a = 0; a < 200 && placed < want; a++) {
+    var ang = rnd() * 6.2832, rad = rnd() * (v.r - 1);
+    var x = Math.round(v.x + Math.cos(ang) * rad), y = Math.round(v.y + Math.sin(ang) * rad);
+    if (!walkable(x, y) || occupied(x, y)) continue;
+    var T;
+    if (placed < roles.length) T = NPCTYPES[1 + placed];       /* one of each trade first */
+    else T = rnd() < 0.42 ? NPCTYPES[4] : NPCTYPES[0];
+    npcs.push(new Npc(T, x, y, floor, v));
+    placed++;
+  }
+  for (var g = 0; g < 2; g++) {                                /* a watch on the gates */
+    var gt = v.gates[(rnd() * v.gates.length) | 0];
+    if (!gt) break;
+    for (var d = 0; d < 4; d++) {
+      var gx = gt.x + DX[d], gy = gt.y + DY[d];
+      if (walkable(gx, gy) && !occupied(gx, gy)) { npcs.push(new Npc(NPCTYPES[4], gx, gy, floor, v)); break; }
+    }
+  }
+}
+
 function theBoss() { for (var i = 0; i < mobs.length; i++) if (mobs[i].boss) return mobs[i]; return null; }
 function knownBoss() { var b = theBoss(); return b && knownMob(b) ? b : null; }
 
@@ -859,6 +1182,48 @@ function isShore(x, y) {
   if (!walkable(x, y)) return false;
   for (var d = 0; d < 4; d++) if (tileAt(x + DX[d], y + DY[d]) <= WATER) return true;
   return false;
+}
+/* Dial's buckets: a shortest path where a made road costs one and open
+   ground costs three, so a lawful hero will take a road up to three times
+   longer rather than cut across a field.  Small integer weights, so the
+   priority queue is four rotating buckets and it stays linear. */
+var ROADW = 1, OPENW = 3, distB = new Int32Array(W * H), seenB = new Int32Array(W * H), stB = 0;
+function stepRoad(sx, sy, tx, ty, budget, avoid, pass) {
+  if (sx === tx && sy === ty) return null;
+  stB++;
+  var NB = OPENW + 1, buckets = [[], [], [], []], start = sy * W + sx, goal = ty * W + tx;
+  seenB[start] = stB; distB[start] = 0; prevB[start] = start;
+  buckets[0].push(start);
+  var done = 0, n = 0, found = false;
+  for (var d = 0; d <= budget && done < NB; d++) {
+    var b = buckets[d % NB];
+    if (!b.length) { done++; continue; }
+    done = 0;
+    while (b.length) {
+      var cur = b.pop();
+      if (distB[cur] !== d) continue;                          /* stale entry */
+      if (cur === goal) { found = true; b.length = 0; break; }
+      if (n++ > budget) { d = budget + 1; break; }
+      var cx = cur % W, cy = (cur - cx) / W;
+      for (var k = 0; k < 4; k++) {
+        var nx = cx + DX[k], ny = cy + DY[k];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        var ni = ny * W + nx;
+        if (ni !== goal && !pass(nx, ny)) continue;
+        if (avoid && ni !== goal && Math.abs(nx - avoid.x) + Math.abs(ny - avoid.y) <= avoid.r) continue;
+        var w = tileAt(nx, ny) === PATH ? ROADW : OPENW, nd = d + w;
+        if (seenB[ni] === stB && distB[ni] <= nd) continue;
+        seenB[ni] = stB; distB[ni] = nd; prevB[ni] = cur;
+        buckets[nd % NB].push(ni);
+      }
+    }
+    if (found) break;
+  }
+  if (!found) return null;
+  var c = goal, guard = 0;
+  while (prevB[c] !== start && guard++ < W * H) c = prevB[c];
+  var fx = c % W, fy = (c - fx) / W;
+  return { x: fx - sx, y: fy - sy };
 }
 function stepToward(sx, sy, tx, ty, budget, avoid, pass) {
   pass = pass || landPass;
@@ -893,7 +1258,7 @@ function stepToward(sx, sy, tx, ty, budget, avoid, pass) {
 var SIGHT = 11, SIGHT_SEA = 16, MOB_MEMORY = 45;
 function seenAt(x, y) { return world.seen[y * W + x]; }
 function visibleAt(x, y) { return parading || world.vis[y * W + x] === tick; }
-function blocksSight(x, y) { return tileAt(x, y) === ROCK; }
+function blocksSight(x, y) { var t = tileAt(x, y); return t === ROCK || t === WALL; }
 function markSeen(x, y) {
   var i = y * W + x;
   world.vis[i] = tick;
@@ -928,6 +1293,10 @@ function updateVision() {
     if (!visibleAt(mobs[m].x, mobs[m].y)) continue;
     mobs[m].seenT = tick; mobs[m].lx = mobs[m].x; mobs[m].ly = mobs[m].y;
   }
+  for (var nv = 0; nv < npcs.length; nv++) {
+    if (!visibleAt(npcs[nv].x, npcs[nv].y)) continue;
+    npcs[nv].seenT = tick; npcs[nv].lx = npcs[nv].x; npcs[nv].ly = npcs[nv].y;
+  }
 }
 function knownMob(m) { return parading || (m.seenT !== undefined && tick - m.seenT <= MOB_MEMORY); }
 function knownItem(o) { return !!o.known; }
@@ -940,10 +1309,12 @@ function islandKnown(id) {
 /* ---------------- ranged combat ----------------
    One model for every arrow and bolt in the game: trace a line, stop at the
    first wall or body, apply damage there, and draw a tracer along the path. */
-function blocksShot(x, y) { var t = tileAt(x, y); return t === TREE || t === ROCK; }
+function blocksShot(x, y) { var t = tileAt(x, y); return t === TREE || t === ROCK || t === WALL || t === FENCE; }
 function bodyAt(x, y) {
   if (hero && hero.x === x && hero.y === y) return hero;
-  for (var i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return mobs[i];
+  var i;
+  for (i = 0; i < mobs.length; i++) if (mobs[i].x === x && mobs[i].y === y) return mobs[i];
+  for (i = 0; i < npcs.length; i++) if (npcs[i].x === x && npcs[i].y === y) return npcs[i];
   return null;
 }
 function traceShot(x0, y0, x1, y1, range) {
@@ -1003,6 +1374,7 @@ function fireShot(from, to, spec) {
   if (tileAt(r.x, r.y) <= WATER) splash(r.x, r.y, 0.030, 1.3);
   if (!r.hit) { if (spec.ele && ELEMENTS[spec.ele].fx === 'blast') applyElement(spec.ele, r.x, r.y, null, spec.dmg, spec.byHero); return null; }
   if (r.hit === hero) hurtHero(Math.max(1, spec.dmg - hero.def), from);
+  else if (r.hit.npc) hurtNpc(r.hit, Math.max(1, spec.dmg - r.hit.def), spec.byHero ? hero : from);
   else damageMob(r.hit, Math.max(1, spec.dmg - r.hit.def), spec.byHero);
   if (spec.ele) applyElement(spec.ele, r.x, r.y, r.hit, spec.dmg, spec.byHero);
   return r.hit;
@@ -1034,6 +1406,9 @@ function damageMob(mob, dmg, byHero) {
   var gold = mob.boss ? 150 + run.floor * 60 : mob.t.gold;
   var xp = mob.boss ? 90 + run.floor * 40 : mob.t.xp;
   hero.gold += gold; hero.kills++; hero.xp += xp; stats.kills++;
+  if (byHero && mob.raider && world.village && inVillage(mob, 3)) moral('raider');
+  if (byHero) for (var rv2 = 0; rv2 < npcs.length; rv2++)     /* was it standing over someone? */
+    if (npcs[rv2].afraid > 0 && dist(npcs[rv2], mob) <= 2) { moral('rescue'); break; }
   if (mob.boss) {
     hero.bosses++; stats.bosses++; shake = 9;
     say('★ ' + mob.name + ' falls');
@@ -1199,6 +1574,7 @@ function chopTurn(t) {
   hero.face = t.x > hero.x ? 1 : t.x < hero.x ? 3 : t.y > hero.y ? 2 : 0;
   fl(t.x, t.y, 'chop', '#d9b487');
   if (hero.chop.left > 0) return;
+  if (world.village && inVillage(t, 2)) moral('vandal');      /* that was someone's tree */
   world.tiles[t.y * W + t.x] = GRASS;
   var got = 3 + (Math.random() < 0.45 ? 1 : 0);
   hero.wood += got; hero.chop = null;
@@ -1329,7 +1705,7 @@ function siteTurn(spot, kind) {
   if (kind === 'fire') b.fuel = FIRE_FUEL;
   builds.push(b);
   if (!run.campAt) run.campAt = { x: spot.x, y: spot.y };
-  stats.builds++;
+  stats.builds++; moral('build');
   say('★ raises a ' + B.n); fl(spot.x, spot.y, B.n.toUpperCase(), '#ffd166');
 }
 /* wood the hero is holding back for something it means to build or launch */
@@ -1455,6 +1831,55 @@ function packUpCamp() {
   if (run.cache) say('packs up the stash for the descent');
 }
 
+
+/* ---------------- the moral compass ----------------
+   Two axes, each in [-1, 1], carried for the length of a run.  A hero starts
+   near the origin with a small lean, so no two are quite the same, and moves
+   from there only by what it actually does.
+
+   Each nudge is scaled by (1 - |value|), which makes the first step away from
+   neutral easy and the last one nearly impossible: a hero can be pushed to
+   the edge but never nailed there, and can always be argued back.  A very
+   slow decay toward the origin means one bad afternoon does not define a run,
+   while a habit does. */
+var ALIGN_BAND = 0.33, ALIGN_DECAY = 0.99995;              /* half-life ~14k turns: a life, not a floor */
+var ALIGN_NAMES = [
+  ['Chaotic Evil',  'Chaotic Neutral', 'Chaotic Good'],
+  ['Neutral Evil',  'True Neutral',    'Neutral Good'],
+  ['Lawful Evil',   'Lawful Neutral',  'Lawful Good']
+];
+function band(v) { return v > ALIGN_BAND ? 2 : v < -ALIGN_BAND ? 0 : 1; }
+function alignName() { return ALIGN_NAMES[band(hero.law)][band(hero.good)]; }
+function moralShift(dg, dl, why) {
+  var g0 = band(hero.good), l0 = band(hero.law);
+  if (dg) hero.good = clamp(hero.good + dg * (1 - Math.abs(hero.good)), -1, 1);
+  if (dl) hero.law = clamp(hero.law + dl * (1 - Math.abs(hero.law)), -1, 1);
+  if (band(hero.good) !== g0 || band(hero.law) !== l0) {
+    say('✵ ' + alignName().toLowerCase());                /* something shifts */
+    fl(hero.x, hero.y, alignName(), band(hero.good) < g0 || band(hero.law) < l0 ? '#c86a8a' : '#8ef2a0');
+  }
+  if (why) hero.lastMoral = why;
+}
+function moralDrift() {                                       /* the pull back to centre */
+  hero.good *= ALIGN_DECAY; hero.law *= ALIGN_DECAY;
+}
+/* --- what the deeds are worth --- */
+var MORAL = {
+  raider:   { g:  0.120, l:  0.020 },   /* cut down a raider inside the fence */
+  rescue:   { g:  0.100, l:  0     },   /* killed something menacing a frightened villager */
+  trade:    { g:  0.038, l:  0.010 },   /* paid the asking price */
+  idle:     { g: -0.055, l:  0     },   /* watched a raid through and did nothing */
+  lure:     { g: -0.030, l:  0     },   /* brought a chase in through the gate */
+  rob:      { g: -0.100, l: -0.130 },
+  murder:   { g: -0.240, l: -0.070 },
+  fleeing:  { g: -0.360, l: -0.070 },   /* cut down a villager already running */
+  build:    { g:  0,     l:  0.022 },
+  vandal:   { g:  0,     l: -0.060 },   /* felled a tree inside the village */
+  road:     { g:  0,     l:  0.0020 },  /* kept to the path */
+  abandon:  { g:  0,     l: -0.020 }    /* walked away from its own plan */
+};
+function moral(k) { var m = MORAL[k]; stats.moral[k] = (stats.moral[k] || 0) + 1; moralShift(m.g, m.l, k); }
+
 /* ---------------- hero brain ---------------- */
 /* Targets are committed to for a while, and a target that leads to visible
    dithering gets banned — that kills the hunt/loot flip-flop. */
@@ -1464,6 +1889,9 @@ function targetValid(lk) {
   if (lk.kind === 'mob') return mobs.indexOf(lk.o) >= 0;
   if (lk.kind === 'item') return items.indexOf(lk.o) >= 0;
   if (lk.kind === 'stash' || lk.kind === 'craft' || lk.kind === 'fire') return builds.indexOf(lk.o) >= 0;
+  if (lk.kind === 'trade') return npcs.indexOf(lk.o) >= 0 && wantsOffer(lk.o.offer);
+  if (lk.kind === 'rob') return npcs.indexOf(lk.o) >= 0 && !!lk.o.offer;
+  if (lk.kind === 'slay') return npcs.indexOf(lk.o) >= 0;
   if (lk.kind === 'site') return !buildAt(lk.o.x, lk.o.y) && hero.wood >= BUILDS[lk.site].wood;
   return !(hero.x === lk.o.x && hero.y === lk.o.y);           /* explore point */
 }
@@ -1519,10 +1947,11 @@ function frontierSpot(wantSea) {
   return spot;
 }
 function frontierScan(wantSea) {
-  var best = null, bd = 1e9, bx = hero.x, by = hero.y;
+  var best = null, bd = 1e9, bx = hero.x, by = hero.y, bad = world.badFront || (world.badFront = {});
   for (var y = 1; y < H - 1; y++) for (var x = 1; x < W - 1; x++) {
     var i = y * W + x;
     if (!world.seen[i]) continue;
+    if (bad[i] > tick) continue;                              /* tried this one; could not get there */
     if (!(walkable(x, y) || (hero.boat && world.tiles[i] <= WATER))) continue;
     if (!hero.boat && world.tiles[i] <= WATER) continue;
     if (!hero.boat && walkable(x, y) && islandAt(x, y) !== islandAt(hero.x, hero.y)) continue;
@@ -1600,9 +2029,185 @@ function boatPlan() {
   return null;
 }
 
+
+/* ---------------- trade ----------------
+   Gold has sat in the HUD doing nothing since the first commit.  A villager
+   carries one thing it is willing to part with and a price for it; the hero
+   buys when the thing is worth having and it has the coin.  Sell something
+   and the stall is bare for a while, so a village is a place to come back to
+   rather than a shop to strip in one visit. */
+var RESTOCK = 140;
+function rollOffer(n, floor, rnd) {
+  var r = rnd(), sells = n.t.sells;
+  if (sells === 'arms') {
+    var slot = ['sword', 'shield', 'armor'][rnd() * 3 | 0];
+    var tier = clamp((floor - 1) + (rnd() < 0.45 ? 1 : 0), 0, MATS.length - 1);
+    var af = affixFor(slot, rnd, 0.30);
+    return { kind: 'gear', slot: slot, tier: tier, affix: af,
+             price: 60 + tier * 70 + (af ? 60 : 0), label: gearName(slot, tier, af) };
+  }
+  if (sells === 'arrows') {
+    if (r < 0.22) {
+      var bt = clamp((floor - 1) + (rnd() < 0.4 ? 1 : 0), 0, BOWMATS.length - 1);
+      var ba = affixFor('bow', rnd, 0.25);
+      return { kind: 'gear', slot: 'bow', tier: bt, affix: ba,
+               price: 70 + bt * 70 + (ba ? 60 : 0), label: gearName('bow', bt, ba) };
+    }
+    if (r < 0.34) { var ek = ELEKEYS[rnd() * ELEKEYS.length | 0];
+      return { kind: 'ammo', ele: ek, n: 1, price: 125, label: ek + ' arrow' }; }
+    return { kind: 'arrows', n: 10 + (rnd() * 8 | 0), price: 38, label: 'arrows' };
+  }
+  if (sells === 'potions') return { kind: 'potion', n: 1, price: 45, label: 'potion' };
+  if (r < 0.5) return { kind: 'wood', n: 5 + (rnd() * 4 | 0), price: 32, label: 'wood' };
+  return { kind: 'scrap', n: 8 + (rnd() * 8 | 0), price: 42, label: 'scrap' };
+}
+/* would the hero actually use this, and can it pay? */
+function wantsOffer(o) {
+  if (!o || hero.gold < o.price) return false;
+  if (villageAnger() >= ANGER_REFUSE) return false;          /* word gets round */
+  if (o.kind === 'gear') return gearScore(o.slot, o.tier, o.affix) > 0;
+  if (o.kind === 'potion') return hero.potions < 4;
+  if (o.kind === 'arrows') return hero.gear.bow >= 0 && hero.arrows <= QUIVER_MAX - o.n;
+  if (o.kind === 'ammo') return hero.gear.bow >= 0 && hero.ammo[o.ele] < 2;
+  if (o.kind === 'wood') return hero.wood < woodReserve();
+  if (o.kind === 'scrap') return !!findBuild('bench') && hero.scrap < reforgeCost(MATS.length - 1);
+  return false;
+}
+function doTrade(n) {
+  var o = n.offer;
+  if (!wantsOffer(o)) { n.offer = null; n.restock = tick + RESTOCK; hero.lock = null; hero.lockT = 0; return; }
+  hero.gold -= o.price; stats.trades++;
+  if (o.kind === 'gear') {
+    var was = hero.gear[o.slot] >= 0 ? { slot: o.slot, tier: hero.gear[o.slot], affix: hero.affix[o.slot] } : null;
+    hero.gear[o.slot] = o.tier; hero.affix[o.slot] = o.affix || null; recalc(hero);
+    if (was) stow(was);
+  } else if (o.kind === 'potion') hero.potions++;
+  else if (o.kind === 'arrows') hero.arrows = Math.min(QUIVER_MAX, hero.arrows + o.n);
+  else if (o.kind === 'ammo') hero.ammo[o.ele] += o.n;
+  else if (o.kind === 'wood') hero.wood += o.n;
+  else if (o.kind === 'scrap') hero.scrap += o.n;
+  moral('trade');
+  say('buys ' + o.label + ' from the ' + n.name + ' (' + o.price + 'g)');
+  fl(hero.x, hero.y, '-' + o.price + 'g', '#ffd166');
+  fl(n.x, n.y, o.label.slice(0, 12), '#8ef2a0');
+  n.offer = null; n.restock = tick + RESTOCK;
+  hero.lock = null; hero.lockT = 0; progress();
+}
+function tradePlan() {
+  if (!npcs.length) return null;
+  var best = null, bd = 1e9;
+  for (var i = 0; i < npcs.length; i++) {
+    var n = npcs[i];
+    if (!n.t.sells || banned(n.id) || !knownMob(n)) continue;
+    if (!n.offer && tick >= (n.restock || 0)) n.offer = rollOffer(n, run.floor, Math.random);
+    if (!wantsOffer(n.offer)) continue;
+    if (offIsland(n) && !hero.boat) continue;
+    var d = dist(hero, n);
+    if (d < bd) { bd = d; best = n; }
+  }
+  if (!best) return null;
+  return { kind: 'trade', o: best, why: 'buying ' + best.offer.label.slice(0, 14) };
+}
+
+
+/* ---------------- villainy, and what it costs ----------------
+   An evil hero can help itself to a stall or to the stallholder.  Neither is
+   free: the village keeps a grudge.  Wary, it stops dealing; angry, the
+   guards come for the hero on sight.  The grudge is per village and so
+   resets with the floor, while the alignment it came from does not — which
+   is what keeps an evil run moving instead of ending in one dead village. */
+var ANGER_REFUSE = 0.4, ANGER_HOSTILE = 0.7, ANGER_DECAY = 0.0008;
+var ROB_AT = -0.18, SLAY_AT = -0.45;
+function villageAnger() { return world.village ? (world.village.anger || 0) : 0; }
+function angerUp(n) {
+  if (!world.village) return;
+  var was = villageAnger();
+  world.village.anger = clamp(was + n, 0, 1);
+  if (was < ANGER_HOSTILE && world.village.anger >= ANGER_HOSTILE) say('the village turns on you');
+  else if (was < ANGER_REFUSE && world.village.anger >= ANGER_REFUSE) say('the villagers will not deal with you');
+}
+function hostileVillage() { return villageAnger() >= ANGER_HOSTILE; }
+
+function robPlan() {
+  if (hero.good > ROB_AT || !npcs.length || villageAnger() >= ANGER_HOSTILE) return null;
+  var best = null, bd = 1e9;
+  for (var i = 0; i < npcs.length; i++) {
+    var n = npcs[i];
+    if (!n.t.sells || banned(n.id) || !knownMob(n) || !n.offer) continue;
+    if (offIsland(n) && !hero.boat) continue;
+    var d = dist(hero, n);
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best ? { kind: 'rob', o: best, why: 'robbing the ' + best.name } : null;
+}
+function doRob(n) {
+  var o = n.offer;
+  if (!o) { hero.lock = null; hero.lockT = 0; return; }
+  if (o.kind === 'gear') {
+    var was = hero.gear[o.slot] >= 0 ? { slot: o.slot, tier: hero.gear[o.slot], affix: hero.affix[o.slot] } : null;
+    if (gearScore(o.slot, o.tier, o.affix) > 0) {
+      hero.gear[o.slot] = o.tier; hero.affix[o.slot] = o.affix || null; recalc(hero);
+      if (was) stow(was);
+    } else stow({ slot: o.slot, tier: o.tier, affix: o.affix });
+  } else if (o.kind === 'potion') hero.potions = Math.min(4, hero.potions + 1);
+  else if (o.kind === 'arrows') hero.arrows = Math.min(QUIVER_MAX, hero.arrows + o.n);
+  else if (o.kind === 'ammo') hero.ammo[o.ele] += o.n;
+  else if (o.kind === 'wood') hero.wood += o.n;
+  else if (o.kind === 'scrap') hero.scrap += o.n;
+  n.offer = null; n.restock = tick + RESTOCK * 2;
+  n.afraid = 30; stats.robberies++;
+  moral('rob'); angerUp(0.25);
+  say('takes the ' + o.label + ' and does not pay');
+  fl(n.x, n.y, 'ROBBED', '#ff6b6b');
+  hero.lock = null; hero.lockT = 0; progress();
+}
+/* the hero swings on a villager */
+function heroSlay(n) {
+  hero.face = n.x > hero.x ? 1 : n.x < hero.x ? 3 : n.y > hero.y ? 2 : 0;
+  hero.swing = 1; progress();
+  var dmg = Math.max(1, Math.round((hero.atk + (Math.random() * 4 | 0)) * hero.effort()) - n.def);
+  hero.spend(hero.meleeCost());
+  var dead = n.hp <= dmg;
+  if (dead) {                                                 /* they carry the day's takings */
+    var coin = 15 + run.floor * 9 + (Math.random() * 20 | 0);
+    hero.gold += coin; fl(n.x, n.y, '+' + coin + 'g', '#ffd166');
+  }
+  hurtNpc(n, dmg, hero);
+  angerUp(dead ? 0.45 : 0.20);
+}
+function slayPlan() {
+  if (hero.good > SLAY_AT || !npcs.length) return null;
+  var best = null, bd = 1e9;
+  for (var i = 0; i < npcs.length; i++) {
+    var n = npcs[i];
+    if (banned(n.id) || !knownMob(n)) continue;
+    if (n.t.guard && hero.hp < hero.max * 0.55) continue;      /* not while hurt */
+    if (offIsland(n) && !hero.boat) continue;
+    var d = dist(hero, n) + (n.t.guard ? 6 : 0);               /* the soft ones first */
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best ? { kind: 'slay', o: best, why: 'hunting the ' + best.name } : null;
+}
+/* a good hero goes looking for whatever is troubling the village */
+function defendPlan() {
+  if (hero.good < 0.10 || !world.village) return null;
+  var best = null, bd = 1e9;
+  for (var i = 0; i < mobs.length; i++) {
+    var m = mobs[i];
+    if (!knownMob(m) || m.boss || banned(m.id)) continue;
+    if (!m.raider && !inVillage(m, 2)) continue;
+    if (offIsland(m) && !hero.boat) continue;
+    var d = dist(hero, m);
+    if (d < bd && d < 40) { bd = d; best = m; }
+  }
+  return best ? { kind: 'mob', o: best, why: 'defending the village' } : null;
+}
+
 function chooseTarget() {
   /* interrupts, in order */
   for (var i = 0; i < mobs.length; i++) if (dist(hero, mobs[i]) <= 1) return { kind: 'mob', o: mobs[i], why: 'fighting ' + (mobs[i].sname || mobs[i].name) };
+  if (hostileVillage()) for (var hg = 0; hg < npcs.length; hg++)
+    if (npcs[hg].t.guard && dist(hero, npcs[hg]) <= 1) return { kind: 'slay', o: npcs[hg], why: 'fighting the guard' };
   if (hero.swimming) {
     var land = nearestLand();
     if (land) return { kind: 'spot', o: land, why: 'swimming for shore' };
@@ -1650,7 +2255,7 @@ function chooseTarget() {
   if (hero.lockT > 0 && targetValid(hero.lock)) { hero.lockT--; return hero.lock; }
 
   /* curiosity: with nothing pressing, sometimes go and look at the dark */
-  if (hero.hp > hero.max * 0.7 && Math.random() < 0.10 && !threatNear(9)) {
+  if (hero.hp > hero.max * 0.7 && Math.random() < 0.10 - hero.law * 0.06 && !threatNear(9)) {
     var peek = frontierSpot(0);
     if (peek && dist(hero, peek) < 45) {
       hero.lock = { kind: 'spot', o: peek, why: 'having a look around' };
@@ -1684,10 +2289,14 @@ function chooseTarget() {
   var junk = camped ? nearestOf(items, function (o) {
     return o.kind === 'gear' && gearScore(o.slot, o.tier, o.affix) <= 0 && far(o);
   }) : null;
-  var stashJob = stashPlan(), craftJob = craftPlan(), campJob = campPlan();
+  var stashJob = stashPlan(), craftJob = craftPlan(), campJob = campPlan(), tradeJob = tradePlan();
+  var robJob = robPlan(), slayJob = slayPlan(), guardJob = defendPlan();
 
   if (hero.hp < hero.max * 0.5 && potion && potion.d < 30) lk = { kind: 'item', o: potion.o, why: 'wounded — potion' };
   else if (gear && gear.d < 26) lk = { kind: 'item', o: gear.o, why: 'claiming ' + gearName(gear.o.slot, gear.o.tier, gear.o.affix) };
+  else if (guardJob) lk = guardJob;                           /* someone is in trouble */
+  else if (robJob) lk = robJob;
+  else if (tradeJob) lk = tradeJob;
   else if (stashJob) lk = stashJob;
   else if (craftJob) lk = craftJob;
   else if (campJob && campJob.kind === 'site') lk = campJob;   /* wood in hand: put it up now */
@@ -1697,6 +2306,7 @@ function chooseTarget() {
   else if (boss && !banned(boss.id) && readyForBoss(boss)) lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
   else if (mob && mob.d <= 18) lk = { kind: 'mob', o: mob.o, why: 'hunting a ' + mob.o.name };
   else if (chest) lk = { kind: 'item', o: chest.o, why: chest.o.kind === 'cache' ? 'unpacking the cache' : 'looting a chest' };
+  else if (slayJob) lk = slayJob;
   else if (campJob) lk = campJob;                             /* spare time: go and fell timber */
   else if (junk && junk.d < 20) lk = { kind: 'item', o: junk.o, why: 'scavenging for scrap' };
   else if (potion) lk = { kind: 'item', o: potion.o, why: 'fetching a potion' };
@@ -1721,7 +2331,7 @@ function chooseTarget() {
   }
 
   hero.lock = lk;
-  hero.lockT = lk.kind === 'spot' ? 60 : 45;                  /* commit */
+  hero.lockT = Math.round((lk.kind === 'spot' ? 60 : 45) + hero.law * 15);   /* the lawful keep to a plan */
   return lk;
 }
 
@@ -1776,9 +2386,23 @@ function heroTurn() {
   hero.ran = 0;
   hero.hist.push(hero.x * 1000 + hero.y);
   if (hero.hist.length > 24) hero.hist.shift();
+  moralDrift();
+  if (world.village && world.village.anger > 0) world.village.anger = Math.max(0, world.village.anger - ANGER_DECAY);
+  if (tileAt(hero.x, hero.y) === PATH) moral('road');          /* keeping to the road is its own habit */
+  if (world.village && tick % 8 === 0 && !(hero.lock && hero.lock.why === 'defending the village')) {
+    for (var iw = 0; iw < mobs.length; iw++) {                 /* a raid, in plain sight, ignored */
+      var rw = mobs[iw];
+      if (!rw.raider || !knownMob(rw) || dist(hero, rw) > 18) continue;
+      if (inVillage(rw, 3) && !rw.idled) { rw.idled = 1; moral('idle'); break; }
+    }
+  }
+  if (world.village && inVillage(hero, 0) && tick % 12 === 0) {
+    for (var lu = 0; lu < mobs.length; lu++)                   /* did it bring something in with it? */
+      if (mobs[lu].wake && !mobs[lu].raider && inVillage(mobs[lu], 0)) { moral('lure'); break; }
+  }
 
   if (oscillating()) {
-    if (hero.lock && hero.lock.o && hero.lock.o.id) hero.ban[hero.lock.o.id] = tick + 90;
+    if (hero.lock && hero.lock.o && hero.lock.o.id) { hero.ban[hero.lock.o.id] = tick + 90; moral('abandon'); }
     hero.lock = null; hero.lockT = 0; hero.hist = []; hero.lastProgress = tick;
     stats.unstuck++;
     var away = safeSpot(22);
@@ -1828,6 +2452,9 @@ function heroTurn() {
   if (tg.kind === 'site') {
     if (hero.x === tg.o.x && hero.y === tg.o.y) { siteTurn(tg.o, tg.site); return; }
   }
+  if (tg.kind === 'trade') { if (dist(hero, tg.o) <= 1) { doTrade(tg.o); return; } }
+  if (tg.kind === 'rob') { if (dist(hero, tg.o) <= 1) { doRob(tg.o); return; } }
+  if (tg.kind === 'slay') { if (dist(hero, tg.o) <= 1) { heroSlay(tg.o); return; } }
   if (tg.kind === 'stash') { if (dist(hero, tg.o) <= 1) { depositTurn(tg.o); return; } }
   if (tg.kind === 'craft') { if (dist(hero, tg.o) <= 1) { craftTurn(); return; } }
   if (tg.kind === 'fire') {
@@ -1845,14 +2472,27 @@ function heroTurn() {
   }
   var bs2 = knownBoss(), avoid = null;
   if (bs2 && !readyForBoss(bs2) && !(tg.kind === 'mob' && tg.o === bs2)) avoid = { x: bs2.x, y: bs2.y, r: 9 };
-  var st = stepToward(hero.x, hero.y, tg.o.x, tg.o.y, 26000, avoid, heroPass);
+  var st = null;
+  if (hero.law > ALIGN_BAND) st = stepRoad(hero.x, hero.y, tg.o.x, tg.o.y, 900, avoid, heroPass);
+  if (!st) st = stepToward(hero.x, hero.y, tg.o.x, tg.o.y, 26000, avoid, heroPass);
   if (!st && avoid && tg.kind !== 'spot') { if (tg.o.id) hero.ban[tg.o.id] = tick + 50; hero.lock = null; hero.lockT = 0; return; }
   if (!st) {
     if (tg.o.id) hero.ban[tg.o.id] = tick + 60;
+    else if (tg.kind === 'spot') {                            /* nowhere near it; stop offering it */
+      (world.badFront || (world.badFront = {}))[tg.o.y * W + tg.o.x] = tick + 500;
+      world.fcache = null;
+    }
     hero.lock = null; hero.lockT = 0; return;
+  }
+  if (hero.law < 0 && Math.random() < -hero.law * 0.10) {      /* a chaotic foot goes its own way */
+    var jd = Math.random() * 4 | 0;
+    if (heroPass(hero.x + DX[jd], hero.y + DY[jd])) st = { x: DX[jd], y: DY[jd] };
   }
   if (tg.kind === 'mob' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { heroAttack(tg.o); return; }
   if (tg.kind === 'tree' && tg.o.x === hero.x + st.x && tg.o.y === hero.y + st.y) { chopTurn(tg.o); return; }
+  if (tg.kind === 'trade' && dist(hero, tg.o) <= 1) { doTrade(tg.o); return; }
+  if (tg.kind === 'rob' && dist(hero, tg.o) <= 1) { doRob(tg.o); return; }
+  if (tg.kind === 'slay' && dist(hero, tg.o) <= 1) { heroSlay(tg.o); return; }
   if (tg.kind === 'stash' && dist(hero, tg.o) <= 1) { depositTurn(tg.o); return; }
   if (tg.kind === 'craft' && dist(hero, tg.o) <= 1) { craftTurn(); return; }
   if (!tryMove(hero, st.x, st.y)) { hero.lockT = Math.min(hero.lockT, 3); return; }
@@ -1956,7 +2596,29 @@ function spawnWanderer() {
 function mobTurn(m) {
   var d = dist(m, hero);
   if (d <= (m.t.aggro || 8)) m.wake = 1;
-  if (!m.wake) { if (!m.boss && Math.random() < 0.25) tryMove(m, DX[Math.random() * 4 | 0], DY[Math.random() * 4 | 0]); return; }
+  if (!m.wake) {                                              /* idling: drift, but not toward the huts */
+    if (!m.boss && Math.random() < 0.25) {
+      var wd = Math.random() * 4 | 0, wx = m.x + DX[wd], wy = m.y + DY[wd];
+      if (m.raider || !inVillage({ x: wx, y: wy }, 2)) tryMove(m, DX[wd], DY[wd]);
+    }
+    return;
+  }
+  if (m.raider) {                                             /* it came for the village */
+    var tgt = null, tb = 999;
+    for (var rv = 0; rv < npcs.length; rv++) {
+      var rd = dist(m, npcs[rv]);
+      if (rd < tb) { tb = rd; tgt = npcs[rv]; }
+    }
+    if (tgt) {
+      if (tb <= 1) { m.swing = 1; m.face = tgt.x > m.x ? 1 : tgt.x < m.x ? 3 : tgt.y > m.y ? 2 : 0;
+        hurtNpc(tgt, Math.max(1, Math.round((m.atk + (Math.random() * 3 | 0)) * m.effort()) - tgt.def), m);
+        m.spend(m.meleeCost()); return; }
+      if (d > 2) {                                            /* the hero still comes first up close */
+        var sr = stepToward(m.x, m.y, tgt.x, tgt.y, 1200, null, mobPass(m));
+        if (sr) { tryMove(m, sr.x, sr.y); return; }
+      }
+    }
+  }
 
   if (m.boss) {
     m.cd = (m.cd || 0) + 1;
@@ -2068,6 +2730,23 @@ function doTurn() {
     if (m.frozen > 0) { m.frozen--; fl(m.x, m.y, '*', '#8fdcff'); continue; }
     if (tick % m.ev === 0) { mobTurn(m); m.breathe(); }
     if (phase.name !== 'play') return;
+  }
+  for (var ni = npcs.length - 1; ni >= 0; ni--) {
+    var np = npcs[ni];
+    if (np.hp <= 0) continue;
+    if (tick % np.ev === 0) { npcTurn(np); np.breathe(); }
+    if (phase.name !== 'play') return;
+  }
+  /* now and then one of them takes an interest in the huts.  One at a time,
+     rarely, so the village bleeds slowly instead of falling in an afternoon. */
+  if (tick % 430 === 0 && world.village && npcs.length && Math.random() < 0.55) {
+    var cand = [];
+    for (var rz = 0; rz < mobs.length; rz++) if (!mobs[rz].boss && !mobs[rz].raider) cand.push(mobs[rz]);
+    if (cand.length) {
+      var rm = cand[(Math.random() * cand.length) | 0];
+      rm.raider = 1; rm.wake = 1; stats.raids++;
+      say('a ' + rm.name + ' turns toward the village');
+    }
   }
   if (tick % 210 === 0) {
     var rank = 0;
@@ -3116,6 +3795,45 @@ function drawBuild(b, sx, sy) {
   }
 }
 
+function drawNpc(n, sx, sy) {
+  var t = n.t, bob = Math.sin(performance.now() / 320 + n.x * 1.7 + n.y) * 0.9;
+  var y = sy + bob, col = n.hurt > 0 ? '#ffffff' : t.col;
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.beginPath(); ctx.ellipse(sx + 12, sy + 21, 7, 3, 0, 0, 6.2832); ctx.fill();
+  rect(ctx, sx + 7, y + 10, 10, 9, col);                     /* smock */
+  rect(ctx, sx + 7, y + 10, 10, 2, t.dark);
+  rect(ctx, sx + 7, y + 19, 3, 3, '#3b3040'); rect(ctx, sx + 14, y + 19, 3, 3, '#3b3040');
+  rect(ctx, sx + 7, y + 3, 10, 8, '#e8bd94');                /* face */
+  rect(ctx, sx + 6, y + 2, 12, 3, t.dark);                   /* cap */
+  rect(ctx, sx + 9, y + 7, 2, 2, '#22222c'); rect(ctx, sx + 13, y + 7, 2, 2, '#22222c');
+  if (n.afraid > 0) {                                        /* wide eyes and a bead of sweat */
+    rect(ctx, sx + 9, y + 6, 2, 3, '#ffffff'); rect(ctx, sx + 13, y + 6, 2, 3, '#ffffff');
+    rect(ctx, sx + 9, y + 7, 2, 2, '#22222c'); rect(ctx, sx + 13, y + 7, 2, 2, '#22222c');
+    rect(ctx, sx + 17, y + 4, 1, 3, '#9fd8e6');
+  }
+  var side = n.face === 3 ? -1 : 1, hx = sx + 12 + side * 7;
+  if (t.tool === 'hammer') { rect(ctx, hx - 1, y + 8, 2, 10, '#6b4a2a'); rect(ctx, hx - 3, y + 6, 6, 4, '#8d9098'); }
+  else if (t.tool === 'hoe') { rect(ctx, hx - 1, y + 5, 2, 14, '#8a6238'); rect(ctx, hx - 1 + side * 2, y + 5, 4, 2, '#9aa2ad'); }
+  else if (t.tool === 'spear') {
+    rect(ctx, hx - 1, y + 1, 2, 20, '#7b5836'); rect(ctx, hx - 2, y - 2, 4, 5, '#c3cbd8');
+    rect(ctx, sx + (side > 0 ? 2 : 18), y + 10, 5, 8, '#6f727a');   /* shield */
+    rect(ctx, sx + (side > 0 ? 2 : 18), y + 10, 5, 2, '#9a9da6');
+  } else if (t.tool === 'bow') {
+    ctx.strokeStyle = '#8a6238'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(hx, y + 13, 6, side > 0 ? -1.1 : 2.0, side > 0 ? 1.1 : 4.2); ctx.stroke();
+  } else if (t.tool === 'flask') {
+    rect(ctx, hx - 2, y + 9, 4, 6, '#8ef2a0'); rect(ctx, hx - 1, y + 7, 2, 2, '#cfd6e4');
+  }
+  if (n.hp < n.max) {
+    rect(ctx, sx + 3, sy - 3, 18, 3, 'rgba(0,0,0,.55)');
+    rect(ctx, sx + 4, sy - 2, Math.max(1, Math.round(16 * n.hp / n.max)), 1, '#8ef2a0');
+  }
+  if (n.swing > 0) {
+    ctx.strokeStyle = 'rgba(200,230,255,' + n.swing + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx + 12 + DX[n.face] * 10, sy + 12 + DY[n.face] * 10, 6, 0, 6.2832); ctx.stroke();
+  }
+}
+
 function drawItem(it, sx, sy) {
   var bob = Math.sin(performance.now() / 300 + it.bob) * 1.6;
   ctx.fillStyle = 'rgba(0,0,0,.25)';
@@ -3305,7 +4023,29 @@ function drawHUD() {
   }
   ctx.fillStyle = '#6e7b91'; ctx.fillText('scrap', X + 122, y);
   ctx.fillStyle = hero.scrap ? '#c3cbd8' : '#3f4859'; ctx.fillText(String(hero.scrap), X + 162, y);
-  y += 16;
+  y += 18;
+
+  /* the compass: good to the right, lawful upward, with the hero's dot on it */
+  var gs = 34, gx0 = X + 14, gy0 = y;
+  rect(ctx, gx0, gy0, gs, gs, '#161c27');
+  for (var gq = 1; gq < 3; gq++) {
+    rect(ctx, gx0 + gq * gs / 3, gy0, 1, gs, '#232c3b');
+    rect(ctx, gx0, gy0 + gq * gs / 3, gs, 1, '#232c3b');
+  }
+  ctx.strokeStyle = '#2a3547'; ctx.strokeRect(gx0 + .5, gy0 + .5, gs - 1, gs - 1);
+  var dgx = gx0 + gs / 2 + hero.good * (gs / 2 - 3), dgy = gy0 + gs / 2 - hero.law * (gs / 2 - 3);
+  var acol = hero.good < -ALIGN_BAND ? '#e8506a' : hero.good > ALIGN_BAND ? '#8ef2a0' : '#c9b98a';
+  rect(ctx, dgx - 2, dgy - 2, 5, 5, '#0b0e14');
+  rect(ctx, dgx - 1, dgy - 1, 3, 3, acol);
+  ctx.fillStyle = acol; ctx.fillText(alignName(), gx0 + gs + 10, gy0 + 4);
+  ctx.fillStyle = '#5f6b80';
+  ctx.fillText('good ' + (hero.good >= 0 ? '+' : '') + hero.good.toFixed(2), gx0 + gs + 10, gy0 + 17);
+  var vg = world.village;
+  if (vg && vg.anger > 0.05) {
+    ctx.fillStyle = vg.anger >= 0.7 ? '#ff6b6b' : '#e0c469';
+    ctx.fillText(vg.anger >= 0.7 ? 'village hostile' : 'village wary', gx0 + gs + 10, gy0 + 28);
+  }
+  y += gs + 8;
 
   var ms = PW - 106, mx = X + 53;
   ctx.fillStyle = '#000'; ctx.fillRect(mx - 1, y - 1, ms + 2, ms + 2);
@@ -3332,6 +4072,12 @@ function drawHUD() {
     var bd2 = builds[k2];
     ctx.fillStyle = bd2.kind === 'fire' ? '#ff9d4d' : bd2.kind === 'stash' ? '#d9b45c' : '#b8c0cc';
     ctx.fillRect(mx + bd2.x * sc - 1, y + bd2.y * sc - 1, 3, 3);
+  }
+  for (k2 = 0; k2 < npcs.length; k2++) {
+    var nn = npcs[k2];
+    if (!world.seen[nn.y * W + nn.x]) continue;
+    ctx.fillStyle = nn.t.guard ? '#cfd6e4' : '#8ef2a0';
+    ctx.fillRect(mx + nn.x * sc, y + nn.y * sc, 2, 2);
   }
   ctx.fillStyle = '#ffffff'; ctx.fillRect(mx + hero.x * sc - 1, y + hero.y * sc - 1, 4, 4);
   ctx.strokeStyle = '#2a3547'; ctx.strokeRect(mx - 1.5, y - 1.5, ms + 3, ms + 3);
@@ -3362,6 +4108,7 @@ function drawCard() {
     spaced('YOU DIED', VPW / 2, mid, 62, 9, gr);
     rect(ctx, VPW / 2 - 200, mid + 16, 400, 1, 'rgba(180,60,50,.45)');
     spaced('FLOOR ' + run.floor + '  ·  LEVEL ' + hero.lvl + '  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 44, 15, 3, 'rgba(190,180,170,.75)');
+    spaced(alignName().toUpperCase(), VPW / 2, mid + 66, 13, 4, 'rgba(180,150,150,.72)');
     spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 70, 12, 3, 'rgba(150,140,135,.6)');
   } else if (phase.name === 'cleared') {
     var g2 = ctx.createLinearGradient(0, mid - 26, 0, mid + 10);
@@ -3376,6 +4123,7 @@ function drawCard() {
     spaced('THE UNDYING IS UNMADE', VPW / 2, mid + 24, 18, 5, 'rgba(240,230,200,.85)');
     rect(ctx, VPW / 2 - 200, mid + 40, 400, 1, 'rgba(200,170,90,.45)');
     spaced('LEVEL ' + hero.lvl + '  ·  ' + hero.kills + ' SLAIN  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 68, 15, 3, 'rgba(220,210,180,.8)');
+    spaced(alignName().toUpperCase(), VPW / 2, mid + 90, 13, 4, 'rgba(220,205,170,.75)');
     spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 94, 12, 3, 'rgba(200,190,160,.6)');
   } else {
     spaced('LUNCHQUEST', VPW / 2, mid - 10, 54, 12, '#dfe6f2');
@@ -3407,6 +4155,7 @@ function smooth(e, dt) {
 function render(dt) {
   smooth(hero, dt);
   for (var i = 0; i < mobs.length; i++) smooth(mobs[i], dt);
+  for (var i2 = 0; i2 < npcs.length; i2++) smooth(npcs[i2], dt);
   var tx = clamp(hero.px * TILE + TILE / 2 - VPW / 2, 0, W * TILE - VPW);
   var ty = clamp(hero.py * TILE + TILE / 2 - VPH / 2, 0, H * TILE - VPH);
   if (Math.abs(cam.x - tx) > TILE * 6 || Math.abs(cam.y - ty) > TILE * 6) { cam.x = tx; cam.y = ty; }
@@ -3429,6 +4178,8 @@ function render(dt) {
   var ents = [], a;
   for (a = 0; a < builds.length; a++) ents.push({ y: builds[a].y, d: builds[a], k: 'b' });
   for (a = 0; a < items.length; a++) if (items[a].known) ents.push({ y: items[a].y, d: items[a], k: 'i' });
+  for (a = 0; a < npcs.length; a++)
+    if (visibleAt(npcs[a].x, npcs[a].y)) ents.push({ y: npcs[a].py, d: npcs[a], k: 'n' });
   for (a = 0; a < mobs.length; a++) {
     var mm3 = mobs[a];
     if (visibleAt(mm3.x, mm3.y)) ents.push({ y: mm3.py, d: mm3, k: 'm' });
@@ -3440,6 +4191,7 @@ function render(dt) {
     var o = ents[a].d;
     if (ents[a].k === 'b') drawBuild(o, o.x * TILE + ox, o.y * TILE + oy);
     else if (ents[a].k === 'i') drawItem(o, o.x * TILE + ox, o.y * TILE + oy);
+    else if (ents[a].k === 'n') drawNpc(o, o.px * TILE + ox, o.py * TILE + oy);
     else if (ents[a].k === 'm') drawMob(o, o.px * TILE + ox, o.py * TILE + oy);
     else if (ents[a].k === 'g') {
       ctx.globalAlpha = 0.26;                                  /* a memory, not a sighting */
@@ -3520,6 +4272,10 @@ function render(dt) {
     mobs[m2].swing = Math.max(0, mobs[m2].swing - dt / 160);
     mobs[m2].hurt = Math.max(0, mobs[m2].hurt - dt / 200);
   }
+  for (var n2 = 0; n2 < npcs.length; n2++) {
+    npcs[n2].swing = Math.max(0, npcs[n2].swing - dt / 160);
+    npcs[n2].hurt = Math.max(0, npcs[n2].hurt - dt / 200);
+  }
   shake = Math.max(0, shake - dt / 90);
 }
 
@@ -3527,9 +4283,10 @@ function render(dt) {
 function boot() {
   buildBaseSheet();
   stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, wrecks: 0,
-           builds: 0, crafts: 0, salvaged: 0, killers: {} };
+           builds: 0, crafts: 0, salvaged: 0, villagers: 0, murders: 0, trades: 0, raids: 0, robberies: 0,
+           moral: {}, killers: {} };
   log = []; tick = 0; shake = 0; run = null; hero = null;
-  mobs = []; items = []; builds = []; floats = []; shots = []; fx = [];
+  mobs = []; npcs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   setPhase('play', 0);
   say('lunchquest — the hero needs no player');
   var sq = typeof location !== 'undefined' ? /seed=([0-9a-f]+)/i.exec(location.search || '') : null;
@@ -3538,6 +4295,16 @@ function boot() {
   if (q) { setPhase(q[1], 100000); phase.t = 42000; }          /* card preview for screenshots */
   if (typeof location !== 'undefined' && /parade/.test(location.search || '')) parade();
   if (typeof location !== 'undefined' && /seatest/.test(location.search || '')) seaTest();
+  if (typeof location !== 'undefined' && /vill/.test(location.search || '')) {
+    if (world.village) {                                      /* dev: stand in the square */
+      var vs = world.village;
+      hero.x = vs.x; hero.y = vs.y - 2; hero.px = hero.x; hero.py = hero.y;
+      while (!walkable(hero.x, hero.y)) hero.y--;
+      cam = { x: hero.x * TILE - VPW / 2, y: hero.y * TILE - VPH / 2 };
+      world.seen.fill(1); world.seenCount = W * H;
+      world.fog.getContext('2d').drawImage(world.mini, 0, 0);
+    }
+  }
   if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
     hero.gear = { sword: 4, shield: 4, armor: 4, bow: 4, axe: 4 };
     hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
@@ -3611,7 +4378,8 @@ if (typeof window !== 'undefined') window.LQ = {
   hero: function () { return hero; }, mobs: function () { return mobs; }, items: function () { return items; },
   stats: function () { return stats; }, run: function () { return run; }, tick: function () { return tick; },
   phase: function () { return phase; }, boss: theBoss,
-  builds: function () { return builds; }, load: heroLoad, enc: encumbrance,
+  builds: function () { return builds; }, npcs: function () { return npcs; },
+  load: heroLoad, enc: encumbrance,
   sea: function () { return { cur: seaCur, cells: seaCells.length, gw: GW, gh: GH }; }, splash: splash, waveAt: waveAt,
   step: oceanStep
 };
@@ -3620,6 +4388,9 @@ if (typeof module !== 'undefined') module.exports = {
   load: heroLoad, enc: encumbrance,
   sea: function () { return { cur: seaCur, cells: seaCells.length, gw: GW, gh: GH }; },
   splash: splash, waveAt: waveAt, step: oceanStep, tileAt: tileAt,
-  render: render, seaTest: seaTest, doTurn: doTurn
+  render: render, seaTest: seaTest, doTurn: doTurn,
+  world: function () { return world; }, newRun: newRun, npcs: function () { return npcs; },
+  village: function () { return world.village; },
+  align: function () { return { good: hero.good, law: hero.law, name: alignName() }; }
 };
 })();
