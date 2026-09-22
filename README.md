@@ -142,67 +142,117 @@ afternoon doesn't define a run while a habit does.
 
 ### What moves it
 
-Almost all of these are events the game already fired; the compass just reads them. The
-weights were set against **measured** per-run frequencies — `road` fires 66 times a run and
-`raider` 0.2 times, so they cannot be worth the same — with the aim that a run's worth of
-one habit is about a third of an axis: enough to cross a band, not enough to pin it.
+Every one of these is an event the game already fires; the compass only reads them. The
+weights are **measured, not guessed** — a script sums `count x weight` over thousands of
+turns and reports the drift per run on each axis, and the weights are set from that. Keeping
+to the road fires ~140 times a run and killing a raider 0.2 times, so they cannot possibly be
+worth the same number.
+
+**Good and evil — how the hero treats people.**
 
 | deed | good | law |
 |---|---|---|
-| cut down a raider inside the fence | +0.12 | +0.02 |
-| kill something menacing a frightened villager | +0.10 | · |
-| pay the asking price | +0.038 | +0.010 |
-| watch a raid through and do nothing | −0.055 | · |
+| give up a potion to a wounded villager | +0.200 | +0.02 |
+| cut down a raider inside the fence | +0.108 | +0.02 |
+| kill something standing over a frightened villager | +0.090 | · |
+| kill the floor boss — the thing terrorising the island | +0.027 | +0.03 |
+| pay over the asking price | +0.019 | +0.01 |
+| stand between the frightened and the threat | +0.019 | · |
+| pay the asking price | +0.018 | +0.01 |
+| fight near the huts rather than off in the wilds | +0.0054 | · |
+| walk the crop down | −0.010 | −0.014 |
 | lead a chase in through the gate | −0.030 | · |
-| rob a stall | −0.10 | −0.13 |
-| kill a villager | −0.24 | −0.07 |
-| kill one that was already running | −0.36 | −0.07 |
-| raise a camp structure | · | +0.022 |
-| fell a tree inside the village | · | −0.060 |
-| keep to the road | · | +0.0020 |
-| walk away from its own plan | · | −0.020 |
+| watch a raid through and do nothing | −0.055 | · |
+| rob a stall | −0.100 | −0.130 |
+| kill a guard — who could at least fight back | −0.200 | −0.07 |
+| kill one who could not | −0.300 | −0.07 |
+| kill one already running | −0.360 | −0.07 |
 
-Indifference is the important one. Standing by while a raid runs its course is the only
-ungated road to evil, and a hero busy looting drifts there without ever deciding to.
+**Law and chaos — how the hero treats order, plans and property.**
 
-### What it changes
+| deed | law |
+|---|---|
+| meet the boss when the sums said meet it | +0.060 |
+| leave no corner of the floor unwalked | +0.050 |
+| keep the campfire in | +0.030 |
+| raise a camp structure | +0.022 |
+| put loot away rather than carry it loose | +0.018 |
+| finish what it set out to do | +0.008 |
+| keep to the path | +0.0020 |
+| walk the crop down | −0.014 |
+| wander off to look at something | −0.018 |
+| drop loot in the grass and walk on | −0.018 |
+| abandon its own plan | −0.020 |
+| spend an elemental arrow on a slime | −0.030 |
+| fell a tree inside the village | −0.060 |
 
-**Good and evil decide who counts as prey.** Past −0.18 the hero starts robbing stalls; past
-−0.45 it hunts the stallholders, who turn out to be carrying the day's takings. Past +0.10 it
-goes looking for whatever is troubling the village and puts that above ordinary hunting.
+Two things fall out of measuring rather than guessing. The law axis balances almost exactly
+on its own — roads, finishing things and camp-building come to +1.30 a run against −1.32 of
+littering, detouring and vandalism, a net of −0.02, which is the unbiased axis we wanted
+without having to force it. And the good axis needed deliberate trimming: left alone it ran
+to +0.21 a run, far past the *slight* tilt intended.
 
-**Lawful and chaotic decide how it moves.** Commitment to a target scales with `law` — 60
-turns lawful, 30 chaotic — so a chaotic hero literally re-decides more, and the flip-flopping
-the anti-dither code was built to suppress becomes character instead of a bug. Curiosity
-runs the other way. A chaotic foot goes its own way on up to a tenth of its steps.
+Indifference is still the important entry to evil. Watching a raid run its course, trampling
+a field and leading a chase in through the gate are the only ungated ways down, so a hero too
+busy looting to care drifts there without ever choosing to.
 
-And a lawful hero **follows roads**. That one is a real shortest path, not a nudge: a second
-pathfinder using Dial's buckets, where a made road costs one and open ground costs three, so
-it will take a road up to three times longer rather than cut across a field. Small integer
-weights mean the priority queue is four rotating buckets and it stays linear.
+### What it gets you
 
-### What it costs to be a villain
+Four characters, not four modifiers. Each pole is a bargain — it buys something real and
+costs something real, so no corner is simply the right place to stand.
 
-Robbing and murder would otherwise be free loot, and every run would slide there. So each
-village keeps a **grudge**. Wary at 0.4, it stops dealing with the hero; angry at 0.7, the
-guards come for it on sight and everyone else runs. The grudge is per village and so resets
-with the floor, while the alignment that earned it does not — which is what keeps an evil run
-moving instead of ending in one dead village.
+**Good — the village comes to trust you.** A `favour` counter mirrors the existing `anger`,
+and the two eat each other, so nobody is both patron and menace. At 0.3 the stalls cut their
+prices; at 0.5 the herbalist presses a potion on a hero who is bleeding; at 0.7 they tell you
+*exactly* where the boss lairs instead of letting you hear it roar, and a guard takes up
+beside you for a few hundred turns and fights what you fight.
+
+**Evil — kin to the things that hunt them.** Monsters notice an evil hero later (aggro radius
+down to 70%), its blows draw a little life back out of what they kill, and corpses give up to
+40% more coin. That is what the closed gates buy: the wilds get quieter as the villages shut.
+
+**Lawful — the disciplined campaigner.** Follows roads by a real weighted path, commits to a
+target for 60 turns, will not meet a boss under-breathed or under-quivered, feeds the fire,
+stows rather than drops — and takes less damage standing shoulder to shoulder with a village
+guard.
+
+**Chaotic — the wild card.** Wanders off plan, re-decides at 30 turns, fights on where a
+lawful hero would have pulled out, and spends rare elemental arrows on whatever is in front
+of it.
+
+And running through both: **the swing itself**. Damage rolls keep the same mean but not the
+same spread — a lawful hero lands `atk + 1.5` almost exactly every time, a chaotic one
+anywhere from feeble to devastating. Identical expected damage, so the axis is character
+rather than power, and it is felt on every single blow.
 
 ### Does it actually diverge?
 
-The thing worth testing is whether runs differ, or whether every hero ends in the same
-corner. Over eight headless sessions (about 45 runs):
+The question worth testing is not whether the numbers move but whether *runs differ* — a
+compass that lands every hero in the same corner is a scoreboard, not a system. Measured
+across headless sessions at the final weights (21 runs, so treat the small slices as
+indicative):
 
 | | share |
 |---|---|
-| True Neutral | 58% |
-| Chaotic / Lawful Neutral | 18% |
-| evil of some stripe | 15% |
-| good of some stripe | 9% |
+| True Neutral | 52% |
+| Lawful / Chaotic Neutral | 28% |
+| good of some stripe | 14% |
+| evil of some stripe | 5% |
 
-Seven of the nine alignments turn up. Most heroes are unremarkable, which is right; the ones
-that aren't got there by a run's worth of small decisions.
+Lawful and chaotic land at 19% and 24% — level to within the sampling noise, which is the
+unbiased ethical axis that was wanted. Good outnumbers evil roughly three to one, which is
+the slight moral tilt that was wanted. Most heroes stay unremarkable, and the ones that
+don't got there over a run's worth of small decisions.
+
+Evil is deliberately the hard corner. A hero has to start with a bad lean *and* keep earning
+it, because the ordinary business of killing bosses, fighting near the huts and paying for
+goods pulls steadily the other way. Past the threshold it compounds — robbing is worth
+another −0.10 — but a robbed village stops dealing and then fights back, so the spiral has a
+floor.
+
+An earlier pass with the threshold at −0.26 produced 12% good and *no* evil at all across 49
+runs: the gate sat outside the range a hero could start in, so nothing could ever fall
+through it. The threshold is the single most sensitive number in the system.
 
 ## Seeds
 

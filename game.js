@@ -1001,7 +1001,7 @@ function carveVillage(rnd, islandId, keepFrom) {
     if (s % 90 < 12) { gate.push({ x: px, y: py }); continue; }   /* leave the gateways open */
     setTile(px, py, FENCE);
   }
-  return { x: vx, y: vy, r: VILL_R, huts: huts, gates: gate, anger: 0 };
+  return { x: vx, y: vy, r: VILL_R, huts: huts, gates: gate, anger: 0, favour: 0 };
 }
 
 
@@ -1057,7 +1057,8 @@ function hurtNpc(n, dmg, bySrc) {
   npcs.splice(npcs.indexOf(n), 1);
   stats.villagers++;
   var byHero = bySrc === hero;
-  if (byHero) { stats.murders++; moral(n.afraid > 0 ? 'fleeing' : 'murder');
+  if (byHero) { stats.murders++; villageFavour(-0.5);
+    moral(n.afraid > 0 ? 'fleeing' : n.hp + dmg < n.max * 0.5 ? 'helpless' : n.t.guard ? 'murder' : 'helpless');
     say('☠ the ' + n.name + ' dies by your hand'); }
   else say('a ' + n.name + ' is killed');
   fl(n.x, n.y, byHero ? 'MURDER' : 'slain', '#ff6b6b');
@@ -1106,6 +1107,15 @@ function npcTurn(n) {
   }
   if (n.afraid > 0) n.afraid--;
 
+  if (n.t.guard && n.escort > tick) {                         /* sworn to the hero for a while */
+    if (thr && td <= 1) { npcAttack(n, thr); return; }
+    var esc = thr && dist(hero, thr) <= 8 ? thr : hero;
+    if (dist(n, esc) > 1) {
+      var se = stepToward(n.x, n.y, esc.x, esc.y, 900, null, landPass);
+      if (se) tryMove(n, se.x, se.y);
+    }
+    return;
+  }
   if (n.t.guard) {
     if (thr && td <= 1) { npcAttack(n, thr); return; }
     /* hold the line: close only on what has come inside, never give chase */
@@ -1386,8 +1396,8 @@ function progress() { hero.lastProgress = tick; }
 function heroAttack(mob) {
   hero.face = mob.x > hero.x ? 1 : mob.x < hero.x ? 3 : mob.y > hero.y ? 2 : 0;
   hero.swing = 1; progress();
-  var dmg = Math.max(1, Math.round((hero.atk + (Math.random() * 4 | 0)) * hero.effort()) - mob.def);
-  hero.spend(hero.meleeCost());
+  var dmg = Math.max(1, Math.round((hero.atk + swingRoll()) * hero.effort()) - mob.def);
+  hero.spend(hero.meleeCost()); darkLeech(dmg);
   var alive = mob.hp > dmg;
   damageMob(mob, dmg, 1);
   if (hero.leech) {
@@ -1403,10 +1413,13 @@ function damageMob(mob, dmg, byHero) {
   fl(mob.x, mob.y, '-' + dmg, mob.boss ? '#ffb4b4' : '#ffd166');
   if (mob.hp > 0) return;
   mobs.splice(mobs.indexOf(mob), 1);
-  var gold = mob.boss ? 150 + run.floor * 60 : mob.t.gold;
+  var gold = Math.round((mob.boss ? 150 + run.floor * 60 : mob.t.gold) * (byHero ? coinScale() : 1));
   var xp = mob.boss ? 90 + run.floor * 40 : mob.t.xp;
   hero.gold += gold; hero.kills++; hero.xp += xp; stats.kills++;
-  if (byHero && mob.raider && world.village && inVillage(mob, 3)) moral('raider');
+  if (byHero && mob.raider && world.village && inVillage(mob, 3)) { moral('raider'); villageFavour(0.22); }
+  if (byHero && mob.boss) moral('slayboss');
+  else if (byHero && world.village && inVillage(mob, 4)) moral('guardian');
+  if (byHero && hero.lock && hero.lock.o === mob) moral('keep');   /* saw it through */
   if (byHero) for (var rv2 = 0; rv2 < npcs.length; rv2++)     /* was it standing over someone? */
     if (npcs[rv2].afraid > 0 && dist(npcs[rv2], mob) <= 2) { moral('rescue'); break; }
   if (mob.boss) {
@@ -1438,6 +1451,7 @@ function hurtHero(dmg, src) {
       say('the boat splinters — swimming!'); fl(hero.x, hero.y, 'WRECKED', '#ff6b6b'); stats.wrecks++;
     }
   }
+  dmg = Math.max(1, dmg - guardBeside());                     /* shoulder to shoulder */
   hero.hp -= dmg; hero.hurt = 1; shake = Math.max(shake, src && src.boss ? 5 : 3); progress();
   fl(hero.x, hero.y, '-' + dmg, '#ff6b6b');
   if (hero.hp <= 0) { hero.hp = 0; heroDied(); }
@@ -1639,7 +1653,7 @@ function shedLoad() {
     hero.wood -= drop;
     var it = { id: nextId++, kind: 'wood', n: drop, known: 1, x: hero.x, y: hero.y, bob: Math.random() * 6 };
     items.push(it); hero.ban[it.id] = tick + 220;             /* leave it be for a while */
-    fl(hero.x, hero.y, '-' + drop + ' wood', '#d9b487'); say('sets down ' + drop + ' wood');
+    fl(hero.x, hero.y, '-' + drop + ' wood', '#d9b487'); say('sets down ' + drop + ' wood'); moral('litter');
     return 1;
   }
   return 0;
@@ -1817,6 +1831,7 @@ function depositTurn(st) {
   var keepScrap = encumbrance() > 1 ? 0 : reforgeCost(MATS.length - 1);
   if (hero.scrap > keepScrap) { st.hold.scrap += hero.scrap - keepScrap; hero.scrap = keepScrap; }
   hero.spend(STAM.build); progress();
+  moral('stow');
   say(n ? 'stows ' + n + ' piece' + (n > 1 ? 's' : '') + ' in the stash' : 'stows supplies');
   fl(hero.x, hero.y, 'stowed', '#b98a4e');
   hero.lock = null; hero.lockT = 0;                           /* done here */
@@ -1865,18 +1880,35 @@ function moralDrift() {                                       /* the pull back t
 }
 /* --- what the deeds are worth --- */
 var MORAL = {
-  raider:   { g:  0.120, l:  0.020 },   /* cut down a raider inside the fence */
-  rescue:   { g:  0.100, l:  0     },   /* killed something menacing a frightened villager */
-  trade:    { g:  0.038, l:  0.010 },   /* paid the asking price */
-  idle:     { g: -0.055, l:  0     },   /* watched a raid through and did nothing */
+  /* --- kindness, and its absence --- */
+  mend:     { g:  0.200, l:  0.020 },   /* gave up a potion to a hurt villager */
+  raider:   { g:  0.108, l:  0.020 },   /* cut down a raider inside the fence */
+  rescue:   { g:  0.090, l:  0     },   /* killed something menacing a frightened villager */
+  slayboss: { g:  0.027, l:  0.030 },   /* the thing that was terrorising the island */
+  tip:      { g:  0.019, l:  0.010 },   /* paid over the asking price */
+  trade:    { g:  0.018, l:  0.010 },   /* paid the asking price */
+  shield:   { g:  0.019, l:  0     },   /* stood between the frightened and the threat */
+  guardian: { g:  0.0054, l:  0     },   /* fought it near the huts rather than in the wilds */
+  trample:  { g: -0.010, l: -0.014 },   /* walked the crop down */
   lure:     { g: -0.030, l:  0     },   /* brought a chase in through the gate */
+  idle:     { g: -0.055, l:  0     },   /* watched a raid through and did nothing */
   rob:      { g: -0.100, l: -0.130 },
-  murder:   { g: -0.240, l: -0.070 },
-  fleeing:  { g: -0.360, l: -0.070 },   /* cut down a villager already running */
+  murder:   { g: -0.200, l: -0.070 },   /* a guard, at least, could fight back */
+  helpless: { g: -0.300, l: -0.070 },   /* one who could not */
+  fleeing:  { g: -0.360, l: -0.070 },   /* one already running */
+  /* --- order, and its absence --- */
   build:    { g:  0,     l:  0.022 },
-  vandal:   { g:  0,     l: -0.060 },   /* felled a tree inside the village */
+  standfast:{ g:  0,     l:  0.060 },   /* met the boss when the sums said meet it */
+  thorough: { g:  0,     l:  0.050 },   /* left no corner of the floor unwalked */
+  stoke:    { g:  0,     l:  0.030 },   /* kept the fire in */
+  stow:     { g:  0,     l:  0.018 },   /* put it away rather than carry it loose */
+  keep:     { g:  0,     l:  0.008 },   /* finished what it set out to do */
   road:     { g:  0,     l:  0.0020 },  /* kept to the path */
-  abandon:  { g:  0,     l: -0.020 }    /* walked away from its own plan */
+  squander: { g:  0,     l: -0.030 },   /* an elemental arrow, on a slime */
+  litter:   { g:  0,     l: -0.018 },   /* dropped it in the grass and walked on */
+  abandon:  { g:  0,     l: -0.020 },   /* walked away from its own plan */
+  detour:   { g:  0,     l: -0.018 },   /* wandered off to look at something */
+  vandal:   { g:  0,     l: -0.060 }    /* felled a tree inside the village */
 };
 function moral(k) { var m = MORAL[k]; stats.moral[k] = (stats.moral[k] || 0) + 1; moralShift(m.g, m.l, k); }
 
@@ -1912,7 +1944,8 @@ function gearScore(slot, tier, affix) {
 }
 function readyForBoss(boss) {
   if (!boss || hero.hp < hero.max * 0.7) return false;
-  if (!boss.wake && hero.stamFrac() < 0.5) return false;      /* don't start a fight out of breath */
+  if (!boss.wake && hero.stamFrac() < 0.5 + Math.max(0, hero.law) * 0.25) return false;
+  if (hero.law > ALIGN_BAND && hero.gear.bow >= 0 && hero.arrows < 4 && !boss.wake) return false;
   var mine = Math.max(1, hero.atk + 1.5 - boss.def);
   var theirs = Math.max(1, boss.atk + 1 - hero.def) * (boss.ab === 'ranged' || boss.ab === 'lich' ? 1.25 : 1);
   var turnsToKill = boss.hp / mine;
@@ -2063,7 +2096,7 @@ function rollOffer(n, floor, rnd) {
 }
 /* would the hero actually use this, and can it pay? */
 function wantsOffer(o) {
-  if (!o || hero.gold < o.price) return false;
+  if (!o || hero.gold < priceFor(o)) return false;
   if (villageAnger() >= ANGER_REFUSE) return false;          /* word gets round */
   if (o.kind === 'gear') return gearScore(o.slot, o.tier, o.affix) > 0;
   if (o.kind === 'potion') return hero.potions < 4;
@@ -2076,7 +2109,10 @@ function wantsOffer(o) {
 function doTrade(n) {
   var o = n.offer;
   if (!wantsOffer(o)) { n.offer = null; n.restock = tick + RESTOCK; hero.lock = null; hero.lockT = 0; return; }
-  hero.gold -= o.price; stats.trades++;
+  var paid = priceFor(o);
+  var over = hero.gold > paid * 4 && hero.good > 0.15 ? Math.round(paid * 0.25) : 0;
+  hero.gold -= paid + over; stats.trades++;
+  if (over) { fl(n.x, n.y, '+' + over + 'g', '#ffd166'); villageFavour(0.05); }
   if (o.kind === 'gear') {
     var was = hero.gear[o.slot] >= 0 ? { slot: o.slot, tier: hero.gear[o.slot], affix: hero.affix[o.slot] } : null;
     hero.gear[o.slot] = o.tier; hero.affix[o.slot] = o.affix || null; recalc(hero);
@@ -2086,8 +2122,8 @@ function doTrade(n) {
   else if (o.kind === 'ammo') hero.ammo[o.ele] += o.n;
   else if (o.kind === 'wood') hero.wood += o.n;
   else if (o.kind === 'scrap') hero.scrap += o.n;
-  moral('trade');
-  say('buys ' + o.label + ' from the ' + n.name + ' (' + o.price + 'g)');
+  moral(over ? 'tip' : 'trade'); villageFavour(0.04);
+  say('buys ' + o.label + ' from the ' + n.name + ' (' + (paid + over) + 'g)');
   fl(hero.x, hero.y, '-' + o.price + 'g', '#ffd166');
   fl(n.x, n.y, o.label.slice(0, 12), '#8ef2a0');
   n.offer = null; n.restock = tick + RESTOCK;
@@ -2117,7 +2153,7 @@ function tradePlan() {
    resets with the floor, while the alignment it came from does not — which
    is what keeps an evil run moving instead of ending in one dead village. */
 var ANGER_REFUSE = 0.4, ANGER_HOSTILE = 0.7, ANGER_DECAY = 0.0008;
-var ROB_AT = -0.18, SLAY_AT = -0.45;
+var ROB_AT = -0.21, SLAY_AT = -0.47;
 function villageAnger() { return world.village ? (world.village.anger || 0) : 0; }
 function angerUp(n) {
   if (!world.village) return;
@@ -2165,7 +2201,7 @@ function doRob(n) {
 function heroSlay(n) {
   hero.face = n.x > hero.x ? 1 : n.x < hero.x ? 3 : n.y > hero.y ? 2 : 0;
   hero.swing = 1; progress();
-  var dmg = Math.max(1, Math.round((hero.atk + (Math.random() * 4 | 0)) * hero.effort()) - n.def);
+  var dmg = Math.max(1, Math.round((hero.atk + swingRoll()) * hero.effort()) - n.def);
   hero.spend(hero.meleeCost());
   var dead = n.hp <= dmg;
   if (dead) {                                                 /* they carry the day's takings */
@@ -2201,6 +2237,93 @@ function defendPlan() {
     if (d < bd && d < 40) { bd = d; best = m; }
   }
   return best ? { kind: 'mob', o: best, why: 'defending the village' } : null;
+}
+
+
+/* ---------------- what an alignment gets you ----------------
+   Four characters rather than four modifiers.  Each pole is a bargain: it
+   buys something real and costs something real, so none of the corners is
+   simply the correct place to stand. */
+
+/* GOOD — the village comes to trust you.  Favour is the mirror of anger and
+   the two eat each other, so a hero cannot be both patron and menace. */
+var FAV_DISCOUNT = 0.30, FAV_GIFT = 0.50, FAV_INTEL = 0.70, FAV_DECAY = 0.0003;
+function villageFavour(n) {
+  var v = world.village;
+  if (!v) return;
+  var was = v.favour || 0;
+  v.favour = clamp(was + n, 0, 1);
+  if (n > 0) v.anger = Math.max(0, (v.anger || 0) - n * 0.6);   /* goodwill cools a grudge */
+  if (was < FAV_INTEL && v.favour >= FAV_INTEL) say('the village counts you a friend');
+  else if (was < FAV_DISCOUNT && v.favour >= FAV_DISCOUNT) say('the villagers greet you warmly');
+}
+function favour() { return world.village ? (world.village.favour || 0) : 0; }
+function priceFor(o) { return Math.max(4, Math.round(o.price * (1 - 0.25 * favour()))); }
+/* the herbalist will not watch you bleed */
+function villageGift() {
+  var v = world.village;
+  if (!v || favour() < FAV_GIFT || tick < (v.giftAt || 0)) return;
+  if (hero.hp > hero.max * 0.4 || hero.potions >= 4) return;
+  for (var i = 0; i < npcs.length; i++) {
+    var n = npcs[i];
+    if (n.t.sells !== 'potions' || dist(hero, n) > 2) continue;
+    hero.potions++; v.giftAt = tick + 320;
+    fl(n.x, n.y, 'a gift', '#8ef2a0'); say('the ' + n.name + ' presses a potion on you');
+    return;
+  }
+}
+/* and they will tell you where the thing is, rather than let you hear it roar */
+function villageIntel() {
+  var v = world.village;
+  if (!v || favour() < FAV_INTEL || v.toldAt === run.floor) return;
+  if (!inVillage(hero, 2)) return;
+  var b = theBoss();
+  if (!b || knownMob(b)) return;
+  v.toldAt = run.floor;
+  run.rumor = { x: b.x, y: b.y };                               /* the truth, not a rough bearing */
+  say('they tell you exactly where it lairs');
+  fl(hero.x, hero.y, 'word of the boss', '#8ef2a0');
+}
+/* a guard will walk with a friend of the village */
+function villageEscort() {
+  var v = world.village;
+  if (!v || favour() < FAV_INTEL || tick < (v.escortAt || 0)) return;
+  if (!inVillage(hero, 3)) return;
+  for (var i = 0; i < npcs.length; i++) {
+    if (!npcs[i].t.guard || npcs[i].escort > tick) continue;
+    npcs[i].escort = tick + 600; v.escortAt = tick + 900;
+    say('a guard takes up beside you'); fl(npcs[i].x, npcs[i].y, 'with you', '#cfd6e4');
+    return;
+  }
+}
+
+/* EVIL — kin to the things that hunt them.  The wilds grow quieter and the
+   dying give up more, which is what the closed gates are paid for. */
+function evilness() { return Math.max(0, -hero.good); }
+function aggroScale() { return 1 - evilness() * 0.30; }         /* they notice you later */
+function coinScale() { return 1 + evilness() * 0.40; }
+function darkLeech(dmg) {
+  var e = evilness();
+  if (e < 0.15) return;
+  var heal = Math.round(dmg * 0.08 * e);
+  if (heal > 0 && hero.hp < hero.max) {
+    hero.hp = Math.min(hero.max, hero.hp + heal);
+    fl(hero.x, hero.y, '+' + heal, '#c86a8a');
+  }
+}
+
+/* LAW — a tight hand; CHAOS — a wild one.  Same expected damage either way,
+   so the axis is character and not power. */
+function swingRoll() {
+  var sp = 3 * (1 - hero.law * 0.9);                            /* spread, not mean */
+  return 1.5 - sp / 2 + Math.random() * sp;
+}
+/* the lawful hold a line beside the village watch */
+function guardBeside() {
+  if (hero.law <= ALIGN_BAND) return 0;
+  for (var i = 0; i < npcs.length; i++)
+    if (npcs[i].t.guard && dist(hero, npcs[i]) <= 1) return Math.round(hero.law * 3);
+  return 0;
 }
 
 function chooseTarget() {
@@ -2242,7 +2365,7 @@ function chooseTarget() {
     }
     return hero.lock;
   }
-  if (hero.hp < hero.max * 0.32 && hero.potions === 0) {
+  if (hero.hp < hero.max * (0.32 + hero.law * 0.12) && hero.potions === 0) {
     var thr = threatNear(4);
     if (thr) {
       if (!hero.lock || hero.lock.why !== 'retreating' || !targetValid(hero.lock)) {
@@ -2259,7 +2382,7 @@ function chooseTarget() {
     var peek = frontierSpot(0);
     if (peek && dist(hero, peek) < 45) {
       hero.lock = { kind: 'spot', o: peek, why: 'having a look around' };
-      hero.lockT = 30; return hero.lock;
+      hero.lockT = 30; moral('detour'); return hero.lock;
     }
   }
 
@@ -2303,7 +2426,10 @@ function chooseTarget() {
   else if (rare && rare.d < 34) lk = { kind: 'item', o: rare.o, why: 'after a ' + rare.o.ele + ' arrow' };
   else if (quiver && quiver.d < 22 && hero.gear.bow >= 0 && hero.arrows < 8) lk = { kind: 'item', o: quiver.o, why: 'restocking arrows' };
   else if (boss && !reach(boss) && readyForBoss(boss) && boatPlan()) lk = boatPlan();
-  else if (boss && !banned(boss.id) && readyForBoss(boss)) lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
+  else if (boss && !banned(boss.id) && readyForBoss(boss)) {
+    if (!boss.metFairly) { boss.metFairly = 1; moral('standfast'); }
+    lk = { kind: 'mob', o: boss, why: 'closing on ' + (boss.sname || boss.n) };
+  }
   else if (mob && mob.d <= 18) lk = { kind: 'mob', o: mob.o, why: 'hunting a ' + mob.o.name };
   else if (chest) lk = { kind: 'item', o: chest.o, why: chest.o.kind === 'cache' ? 'unpacking the cache' : 'looting a chest' };
   else if (slayJob) lk = slayJob;
@@ -2345,6 +2471,9 @@ function oscillating() {
 
 function pickAmmo(target) {
   var cluster = mobsNear(target.x, target.y, 2, null).length;
+  if (hero.law < -ALIGN_BAND && Math.random() < -hero.law * 0.4) {   /* why save it? */
+    for (var ck = 0; ck < ELEKEYS.length; ck++) if (hero.ammo[ELEKEYS[ck]] > 0) return ELEKEYS[ck];
+  }
   if (hero.ammo.fire > 0 && (target.boss || cluster >= 3)) return 'fire';
   if (hero.ammo.shock > 0 && (target.boss || cluster >= 2)) return 'shock';
   if (hero.ammo.frost > 0 && (target.boss || hero.hp < hero.max * 0.5)) return 'frost';
@@ -2357,7 +2486,8 @@ function heroShot(target) {
   if (!ele && hero.arrows <= 0) return false;
   if (!ele && !target.boss && hero.arrows <= 2) return false;  /* save the last few */
   if (!canShoot(hero, target, hero.rng)) return false;
-  if (ele) { hero.ammo[ele]--; stats.specials++; say('looses a ' + ele + ' arrow'); }
+  if (ele) { hero.ammo[ele]--; stats.specials++; say('looses a ' + ele + ' arrow');
+    if (!target.boss) moral('squander'); }
   else hero.arrows--;
   hero.shoot = 1; stats.shots++; progress(); hero.spend(STAM.bow);
   hero.face = Math.abs(target.x - hero.x) > Math.abs(target.y - hero.y)
@@ -2365,7 +2495,7 @@ function heroShot(target) {
   if (!ele && hero.burn && Math.random() < 0.35) ele = 'fire';  /* a burning bow catches now and then */
   var M = BOWMATS[hero.gear.bow], E = ele ? ELEMENTS[ele] : null;
   fireShot(hero, target, {
-    range: hero.rng, dmg: Math.round((hero.rpow + 2 + (Math.random() * 4 | 0)) * hero.effort() * (ele ? 1.5 : 1)),
+    range: hero.rng, dmg: Math.round((hero.rpow + 0.5 + swingRoll()) * hero.effort() * (ele ? 1.5 : 1)),
     kind: ele || 'arrow', col: E ? E.edge : M.edge, ele: ele, byHero: 1 });
   return true;
 }
@@ -2388,7 +2518,16 @@ function heroTurn() {
   if (hero.hist.length > 24) hero.hist.shift();
   moralDrift();
   if (world.village && world.village.anger > 0) world.village.anger = Math.max(0, world.village.anger - ANGER_DECAY);
+  if (world.village && world.village.favour > 0) world.village.favour = Math.max(0, world.village.favour - FAV_DECAY);
+  if (tick % 5 === 0) { villageGift(); villageIntel(); villageEscort(); }
   if (tileAt(hero.x, hero.y) === PATH) moral('road');          /* keeping to the road is its own habit */
+  if (tileAt(hero.x, hero.y) === CROP) { setTile(hero.x, hero.y, FARM); moral('trample'); }
+  if (tick % 10 === 0) for (var sh2 = 0; sh2 < npcs.length; sh2++) {
+    var nf = npcs[sh2];                                        /* standing between them and it */
+    if (nf.afraid <= 0 || dist(hero, nf) > 3) continue;
+    var thr2 = threatNear(6);
+    if (thr2 && dist(hero, thr2) < dist(nf, thr2)) { moral('shield'); break; }
+  }
   if (world.village && tick % 8 === 0 && !(hero.lock && hero.lock.why === 'defending the village')) {
     for (var iw = 0; iw < mobs.length; iw++) {                 /* a raid, in plain sight, ignored */
       var rw = mobs[iw];
@@ -2434,7 +2573,7 @@ function heroTurn() {
     var fb2 = atBuild('fire');
     if (fb2) {                                                /* a fire is worth more than bare ground */
       if (fb2.fuel < FUEL_PER_WOOD && hero.wood > woodReserve()) {   /* feed it from the spare */
-        hero.wood--; fb2.fuel += FUEL_PER_WOOD;
+        hero.wood--; fb2.fuel += FUEL_PER_WOOD; moral('stoke');
         fl(fb2.x, fb2.y, 'stoked', '#ff9d4d');
       }
       if (fb2.fuel > 0) {
@@ -2595,7 +2734,7 @@ function spawnWanderer() {
 
 function mobTurn(m) {
   var d = dist(m, hero);
-  if (d <= (m.t.aggro || 8)) m.wake = 1;
+  if (d <= (m.t.aggro || 8) * aggroScale()) m.wake = 1;
   if (!m.wake) {                                              /* idling: drift, but not toward the huts */
     if (!m.boss && Math.random() < 0.25) {
       var wd = Math.random() * 4 | 0, wx = m.x + DX[wd], wy = m.y + DY[wd];
@@ -2666,6 +2805,7 @@ function mobTurn(m) {
 
 /* ---------------- run flow ---------------- */
 function floorCleared() {
+  if (world.seenCount > W * H * 0.26) moral('thorough');       /* walked the whole floor */
   if (run.floor >= FLOORS) {
     stats.wins++;
     stats.best = Math.max(stats.best, FLOORS);
@@ -4042,8 +4182,12 @@ function drawHUD() {
   ctx.fillText('good ' + (hero.good >= 0 ? '+' : '') + hero.good.toFixed(2), gx0 + gs + 10, gy0 + 17);
   var vg = world.village;
   if (vg && vg.anger > 0.05) {
-    ctx.fillStyle = vg.anger >= 0.7 ? '#ff6b6b' : '#e0c469';
-    ctx.fillText(vg.anger >= 0.7 ? 'village hostile' : 'village wary', gx0 + gs + 10, gy0 + 28);
+    ctx.fillStyle = vg.anger >= ANGER_HOSTILE ? '#ff6b6b' : '#e0c469';
+    ctx.fillText(vg.anger >= ANGER_HOSTILE ? 'village hostile' : 'village wary', gx0 + gs + 10, gy0 + 28);
+  } else if (vg && vg.favour > 0.05) {
+    ctx.fillStyle = vg.favour >= FAV_INTEL ? '#8ef2a0' : '#7fa8c9';
+    ctx.fillText(vg.favour >= FAV_INTEL ? 'village friend' : vg.favour >= FAV_DISCOUNT ? 'village warm' : 'village knows you',
+                 gx0 + gs + 10, gy0 + 28);
   }
   y += gs + 8;
 
@@ -4391,6 +4535,7 @@ if (typeof module !== 'undefined') module.exports = {
   render: render, seaTest: seaTest, doTurn: doTurn,
   world: function () { return world; }, newRun: newRun, npcs: function () { return npcs; },
   village: function () { return world.village; },
-  align: function () { return { good: hero.good, law: hero.law, name: alignName() }; }
+  align: function () { return { good: hero.good, law: hero.law, name: alignName() }; },
+  favour: function () { return world.village ? { favour: world.village.favour || 0, anger: world.village.anger || 0 } : null; }
 };
 })();
