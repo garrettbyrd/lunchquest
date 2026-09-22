@@ -285,6 +285,19 @@ wall, door, fence, well), which means sight, arrows and pathfinding all understa
 village for free — a wall stops an eye and an arrow because it *is* a wall, not because
 anything was written about houses.
 
+Two details that cost little and matter a lot to how it reads. **Fences connect**: the fence
+is not one picture but sixteen, one per combination of neighbours it could nail a rail to,
+picked at draw time from a four-bit mask — and the ring is walked orthogonally rather than
+sampled off a circle, so consecutive posts actually touch instead of standing about as a
+dotted line of lonely stakes. The rails are drawn as an overlay on whatever ground they
+stand in, so a fence looks right on grass, sand or ice.
+
+And **the built world keeps its own colours**. Each floor's palette recipe is a hue and
+saturation pass over the tilesheet, which is right for earth and rock and badly wrong for
+timber — on the Frostmarch it turned every hut, fence and crop the same pale blue as the
+snow. The recipe now stops at the natural-ground rows, so a village looks like a village on
+every floor.
+
 Living in it are five kinds of villager, each with a trade and a tool: a **smith** with a
 hammer, a **fletcher** with a bow, a **herbalist** with a flask, **farmers** with hoes, and
 **guards** with spear and shield, a pair of whom stand at the gates. They are kept in their
@@ -334,6 +347,12 @@ hits it. What the hero does around a village is most of what shapes its characte
 [The moral compass](#the-moral-compass).
 
 ## Boats and woodcraft
+
+A felled tree leaves a **stump** rather than bare grass, so a worked-over wood shows its
+history. (The stump also fixed a real bug: a chop target stayed valid after the tree came
+down, because validity only asked whether the hero was standing on the tile — so the hero
+would happily go on swinging at a patch of grass. It now asks whether there is still a tree
+there.)
 
 The hero cannot swim. To reach another island it has to find an axe, fell trees for wood
 (each tree takes a few turns and the tile really does become grass), carry six wood to a

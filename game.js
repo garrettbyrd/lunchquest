@@ -37,11 +37,12 @@ function makeNoise(rnd) {
 var TILE = 24, W = 160, H = 160;
 var CW = 960, CH = 540, VPW = 716, VPH = 540;
 var DEEP = 0, WATER = 1, SAND = 2, GRASS = 3, TALL = 4, TREE = 5, ROCK = 6, PATH = 7, FLOWER = 8;
-var FARM = 9, CROP = 10, FLOOR = 11, WALL = 12, DOOR = 13, FENCE = 14, WELL = 15;
-var NTILE = 16;
-var WALK = [0, 0, 1, 1, 1, 0, 0, 1, 1,  1, 1, 1, 0, 1, 0, 0];
+var FARM = 9, CROP = 10, FLOOR = 11, WALL = 12, DOOR = 13, FENCE = 14, WELL = 15, STUMP = 16;
+var NTILE = 17;
+var VILLAGE_ROW = 9;                                        /* rows from here down keep their own colours */
+var WALK = [0, 0, 1, 1, 1, 0, 0, 1, 1,  1, 1, 1, 0, 1, 0, 0,  1];
 var MINI = ['#12283f', '#1d5b91', '#d8c48c', '#3f8a3f', '#4fa04a', '#245227', '#7d7f86', '#b09a6d', '#5aa84e',
-            '#6b4f31', '#6f8a3a', '#a2764a', '#7b5836', '#c9a06a', '#8a6a44', '#8d9098'];
+            '#6b4f31', '#6f8a3a', '#a2764a', '#7b5836', '#c9a06a', '#8a6a44', '#8d9098',  '#6d5a34'];
 var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 var VARIANTS = 4, TURN_MS = 145, FLOORS = 5;
 
@@ -173,10 +174,30 @@ var baseSheet = null, sheets = [];
 function rect(g, x, y, w, h, c) { g.fillStyle = c; g.fillRect(x, y, w, h); }
 function newCanvas(w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
+var fenceSheet = null;
+function buildFenceSheet() {
+  var cv = newCanvas(TILE * 16, TILE), g = cv.getContext('2d'), rnd = mulberry32(0xFEEDBEEF);
+  for (var m = 0; m < 16; m++) {
+    var ox = m * TILE, i;
+    var rails = [[8, 3], [15, 3]];                             /* two rails, at these heights */
+    for (i = 0; i < 2; i++) {
+      var ry = rails[i][0], rh = rails[i][1];
+      if (m & 8) { rect(g, ox, ry, 12, rh, '#8a6238'); rect(g, ox, ry, 12, 1, '#b78a54'); }        /* west */
+      if (m & 2) { rect(g, ox + 12, ry, 12, rh, '#8a6238'); rect(g, ox + 12, ry, 12, 1, '#b78a54'); } /* east */
+    }
+    if (m & 1) { rect(g, ox + 9, 0, 3, 13, '#7d5730'); rect(g, ox + 9, 0, 1, 13, '#a87f4a'); }     /* north */
+    if (m & 4) { rect(g, ox + 9, 11, 3, 13, '#7d5730'); rect(g, ox + 9, 11, 1, 13, '#a87f4a'); }   /* south */
+    rect(g, ox + 9, 3, 5, 19, '#6b4a2a');                      /* the post itself */
+    rect(g, ox + 9, 3, 5, 2, '#9c7440');
+    rect(g, ox + 9, 3, 1, 19, '#8a6238');
+    rect(g, ox + 10, 21, 3, 2, 'rgba(0,0,0,.35)');
+  }
+  fenceSheet = cv;
+}
 function buildBaseSheet() {
   var cv = newCanvas(TILE * VARIANTS, TILE * NTILE), g = cv.getContext('2d'), rnd = mulberry32(0xC0FFEE);
   var base = ['#12283f', '#1d5b91', '#d6c189', '#3d8a3f', '#48993f', '#245227', '#797b82', '#ab9468', '#3d8a3f',
-              '#6b4f31', '#6b4f31', '#a2764a', '#7b5836', '#7b5836', '#48993f', '#797b82'];
+              '#6b4f31', '#6b4f31', '#a2764a', '#7b5836', '#7b5836', '#48993f', '#797b82',  '#48993f'];
   for (var t = 0; t < NTILE; t++) for (var v = 0; v < VARIANTS; v++) {
     var ox = v * TILE, oy = t * TILE, i, x, y;
     rect(g, ox, oy, TILE, TILE, base[t]);
@@ -253,6 +274,21 @@ function buildBaseSheet() {
       rect(g, ox, oy + 15, TILE, 3, '#8a6238'); rect(g, ox, oy + 15, TILE, 1, '#b78a54');
       rect(g, ox + 4, oy + 4, 3, 17, '#6b4a2a'); rect(g, ox + 4, oy + 4, 3, 1, '#9c7440');
       rect(g, ox + 16, oy + 4, 3, 17, '#6b4a2a'); rect(g, ox + 16, oy + 4, 3, 1, '#9c7440');
+    } else if (t === STUMP) {
+      var n2 = 6;
+      for (i = 0; i < n2; i++) rect(g, ox + 1 + (rnd() * (TILE - 2) | 0), oy + 2 + (rnd() * (TILE - 5) | 0), 1, 3, rnd() < 0.5 ? 'rgba(0,50,0,.35)' : 'rgba(160,235,120,.30)');
+      g.fillStyle = '#3f2a14';                                  /* shadow under the bole */
+      g.beginPath(); g.ellipse(ox + 12, oy + 16, 8, 4.5, 0, 0, 6.2832); g.fill();
+      g.fillStyle = '#5b3a1e';
+      g.beginPath(); g.ellipse(ox + 12, oy + 14, 8, 4.5, 0, 0, 6.2832); g.fill();
+      g.fillStyle = '#8a6238';                                  /* the cut face */
+      g.beginPath(); g.ellipse(ox + 12, oy + 13, 6.5, 3.6, 0, 0, 6.2832); g.fill();
+      g.strokeStyle = '#6b4a2a'; g.lineWidth = 1;                /* growth rings */
+      for (i = 1; i <= 2; i++) {
+        g.beginPath(); g.ellipse(ox + 12, oy + 13, 2 + i * 2, 1.1 + i * 1.2, 0, 0, 6.2832); g.stroke();
+      }
+      rect(g, ox + 11, oy + 12, 2, 2, '#5b3a1e');
+      for (i = 0; i < 3; i++) rect(g, ox + 3 + (rnd() * 18 | 0), oy + 18 + (rnd() * 4 | 0), 2, 1, '#c9a06a');
     } else if (t === WELL) {
       for (i = 0; i < 6; i++) rect(g, ox + 1 + (rnd() * (TILE - 2) | 0), oy + 2 + (rnd() * 18 | 0), 1, 3, 'rgba(0,50,0,.25)');
       rect(g, ox + 3, oy + 7, 18, 14, '#6f727a');              /* stone ring */
@@ -284,7 +320,10 @@ function sheetFor(floor) {
   if (!def.recipe) { sheets[i] = baseSheet; return baseSheet; }
   var cv = newCanvas(baseSheet.width, baseSheet.height), g = cv.getContext('2d');
   g.drawImage(baseSheet, 0, 0);
-  applyRecipe(cv, def.recipe, TILE * 2, cv.height - TILE * 2);   /* land rows only */
+  /* natural ground takes the floor's mood; timber, thatch and stone do not —
+     a village should look like a village on the ice floor, not like ice */
+  applyRecipe(cv, def.recipe, TILE * 2, TILE * (VILLAGE_ROW - 2));
+  applyRecipe(cv, def.recipe, TILE * STUMP, TILE);            /* except the stump, which is ground */
   if (def.sea) {                                                 /* the water stays water */
     g.save();
     g.beginPath(); g.rect(0, 0, cv.width, TILE * 2); g.clip();
@@ -393,6 +432,11 @@ function genWorld(seed) {
            seen: new Uint8Array(W * H), vis: new Int32Array(W * H).fill(-1), seenCount: 0, fog: fog, mini: mm, rnd: rnd };
 }
 function tileAt(x, y) { return (x < 0 || y < 0 || x >= W || y >= H) ? ROCK : world.tiles[y * W + x]; }
+function railTo(x, y) { var t = tileAt(x, y); return t === FENCE || t === WALL || t === DOOR; }
+function fenceMask(x, y) {                                  /* N E S W, as bits */
+  return (railTo(x, y - 1) ? 1 : 0) | (railTo(x + 1, y) ? 2 : 0) |
+         (railTo(x, y + 1) ? 4 : 0) | (railTo(x - 1, y) ? 8 : 0);
+}
 function walkable(x, y) { return !!WALK[tileAt(x, y)]; }
 
 /* ---------------- the ocean ----------------
@@ -420,8 +464,8 @@ var SEA_SWELL = 0.0016, SEA_SWELL_N = 3;                    /* ambient chop; 0 l
    ~4.5 over the deeps, ~2.8 in the shallows.  The hero's boat makes 6.9
    tiles/s, so its Froude number is 1.5 deep and 2.5 inshore — supercritical
    both ways, which is what draws the V behind it, and a tighter V in close. */
-var SEA_K = [0.090, 0.035, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0];
-var SEA_DAMP = [0.9800, 0.9660, 1, 1, 1, 1, 1, 1, 1,  1, 1, 1, 1, 1, 1, 1];  /* ~1.8s deep, ~1.1s surf */
+var SEA_K = [0.090, 0.035, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0,  0];
+var SEA_DAMP = [0.9800, 0.9660, 1, 1, 1, 1, 1, 1, 1,  1, 1, 1, 1, 1, 1, 1,  1];  /* ~1.8s deep, ~1.1s surf */
 var SEA_SPONGE = 7;                                         /* absorbing rim, so the map edge doesn't ring */
 
 var seaCur = null, seaPrv, seaKE, seaKW, seaKN, seaKS, seaKC, seaDmp, seaCells;
@@ -994,12 +1038,28 @@ function carveVillage(rnd, islandId, keepFrom) {
       setTile(xx, yy, rnd() < 0.65 ? CROP : FARM);
   }
 
-  var gate = [];                                             /* a fence, with ways through it */
-  for (var s = 0; s < 360; s += 5) {
-    var rr = VILL_R + 1.2, px = Math.round(vx + Math.cos(s * 0.01745) * rr), py = Math.round(vy + Math.sin(s * 0.01745) * rr);
-    if (!clearFor(px, py, 1, 1)) continue;
-    if (s % 90 < 12) { gate.push({ x: px, y: py }); continue; }   /* leave the gateways open */
+  /* a fence, with ways through it.  Walking the ring orthogonally rather than
+     sampling it means consecutive posts actually touch, so the rails join up
+     into a run instead of a dotted line of lonely stakes. */
+  var gate = [], prev = null;
+  for (var s = 0; s < 360; s += 3) {
+    var rr = VILL_R + 1.2;
+    var px = Math.round(vx + Math.cos(s * 0.01745) * rr), py = Math.round(vy + Math.sin(s * 0.01745) * rr);
+    if (s % 90 < 14) {                                        /* leave the gateways open */
+      if (clearFor(px, py, 1, 1)) gate.push({ x: px, y: py });
+      prev = null; continue;
+    }
+    if (!clearFor(px, py, 1, 1)) { prev = null; continue; }
+    if (prev) {
+      var ax = prev.x, ay = prev.y, guard = 0;
+      while ((ax !== px || ay !== py) && guard++ < 8) {
+        if (Math.abs(px - ax) > Math.abs(py - ay)) ax += px > ax ? 1 : -1;
+        else ay += py > ay ? 1 : -1;
+        if (clearFor(ax, ay, 1, 1)) setTile(ax, ay, FENCE);
+      }
+    }
     setTile(px, py, FENCE);
+    prev = { x: px, y: py };
   }
   return { x: vx, y: vy, r: VILL_R, huts: huts, gates: gate, anger: 0, favour: 0 };
 }
@@ -1582,6 +1642,7 @@ function nearestShore() {
   return best;
 }
 function chopTurn(t) {
+  if (tileAt(t.x, t.y) !== TREE) { hero.chop = null; hero.lock = null; hero.lockT = 0; return; }
   if (!hero.chop || hero.chop.x !== t.x || hero.chop.y !== t.y)
     hero.chop = { x: t.x, y: t.y, left: SLOTS.axe.chop[hero.gear.axe] };
   hero.chop.left--; hero.swing = 1; progress(); hero.spend(STAM.chop);
@@ -1589,7 +1650,7 @@ function chopTurn(t) {
   fl(t.x, t.y, 'chop', '#d9b487');
   if (hero.chop.left > 0) return;
   if (world.village && inVillage(t, 2)) moral('vandal');      /* that was someone's tree */
-  world.tiles[t.y * W + t.x] = GRASS;
+  world.tiles[t.y * W + t.x] = STUMP;
   var got = 3 + (Math.random() < 0.45 ? 1 : 0);
   hero.wood += got; hero.chop = null;
   fl(t.x, t.y, '+' + got + ' wood', '#d9b487');
@@ -1925,6 +1986,7 @@ function targetValid(lk) {
   if (lk.kind === 'rob') return npcs.indexOf(lk.o) >= 0 && !!lk.o.offer;
   if (lk.kind === 'slay') return npcs.indexOf(lk.o) >= 0;
   if (lk.kind === 'site') return !buildAt(lk.o.x, lk.o.y) && hero.wood >= BUILDS[lk.site].wood;
+  if (lk.kind === 'tree') return tileAt(lk.o.x, lk.o.y) === TREE;   /* felled: stop swinging */
   return !(hero.x === lk.o.x && hero.y === lk.o.y);           /* explore point */
 }
 function nearestOf(list, ok) {
@@ -4315,7 +4377,10 @@ function render(dt) {
   for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
     var idx = yy * W + xx, dx2 = xx * TILE + ox, dy2 = yy * TILE + oy;
     if (!world.seen[idx]) { rect(ctx, dx2, dy2, TILE, TILE, '#05070c'); continue; }
-    ctx.drawImage(sheet, world.variant[idx] * TILE, world.tiles[idx] * TILE, TILE, TILE, dx2, dy2, TILE, TILE);
+    if (world.tiles[idx] === FENCE) {                          /* ground first, then the rails */
+      ctx.drawImage(sheet, world.variant[idx] * TILE, GRASS * TILE, TILE, TILE, dx2, dy2, TILE, TILE);
+      ctx.drawImage(fenceSheet, fenceMask(xx, yy) * TILE, 0, TILE, TILE, dx2, dy2, TILE, TILE);
+    } else ctx.drawImage(sheet, world.variant[idx] * TILE, world.tiles[idx] * TILE, TILE, TILE, dx2, dy2, TILE, TILE);
     if (world.vis[idx] !== tick) rect(ctx, dx2, dy2, TILE, TILE, 'rgba(4,6,12,.58)');
   }
   drawOcean(ox, oy);
@@ -4425,7 +4490,7 @@ function render(dt) {
 
 /* ---------------- boot ---------------- */
 function boot() {
-  buildBaseSheet();
+  buildBaseSheet(); buildFenceSheet();
   stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, wrecks: 0,
            builds: 0, crafts: 0, salvaged: 0, villagers: 0, murders: 0, trades: 0, raids: 0, robberies: 0,
            moral: {}, killers: {} };
@@ -4439,6 +4504,15 @@ function boot() {
   if (q) { setPhase(q[1], 100000); phase.t = 42000; }          /* card preview for screenshots */
   if (typeof location !== 'undefined' && /parade/.test(location.search || '')) parade();
   if (typeof location !== 'undefined' && /seatest/.test(location.search || '')) seaTest();
+  if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
+    hero.gear = { sword: 4, shield: 4, armor: 4, bow: 4, axe: 4 };
+    hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
+    recalc(hero); hero.hp = hero.max;
+    hero.arrows = QUIVER_MAX; hero.ammo = { fire: 9, frost: 9, shock: 9 };
+    hero.wood = 20; hero.scrap = 60; hero.boat = 1; hero.boatHp = 3;
+  }
+  var fq = typeof location !== 'undefined' ? /floor=(\d)/.exec(location.search || '') : null;
+  if (fq) { run.floor = clamp(+fq[1], 1, FLOORS); buildFloor(run.floor); }
   if (typeof location !== 'undefined' && /vill/.test(location.search || '')) {
     if (world.village) {                                      /* dev: stand in the square */
       var vs = world.village;
@@ -4449,15 +4523,6 @@ function boot() {
       world.fog.getContext('2d').drawImage(world.mini, 0, 0);
     }
   }
-  if (typeof location !== 'undefined' && /kit/.test(location.search || '')) {
-    hero.gear = { sword: 4, shield: 4, armor: 4, bow: 4, axe: 4 };
-    hero.affix = { sword: 'vampiric', shield: 'sturdy', armor: 'warded', bow: 'keen', axe: 'swift' };
-    recalc(hero); hero.hp = hero.max;
-    hero.arrows = QUIVER_MAX; hero.ammo = { fire: 9, frost: 9, shock: 9 };
-    hero.wood = 20; hero.scrap = 60; hero.boat = 1; hero.boatHp = 3;
-  }
-  var fq = typeof location !== 'undefined' ? /floor=(\d)/.exec(location.search || '') : null;
-  if (fq) { run.floor = clamp(+fq[1], 1, FLOORS); buildFloor(run.floor); }
   if (typeof location !== 'undefined' && /camp/.test(location.search || '')) {
     hero.wood = 30;                                           /* dev: a camp already standing */
     for (var ck = 0; ck < BUILDKEYS.length; ck++) {
