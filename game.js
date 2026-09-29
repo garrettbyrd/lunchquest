@@ -118,7 +118,8 @@ var SLOTKEYS = ['sword', 'shield', 'armor', 'bow', 'axe'];
 var BOAT_WOOD = 6, BOAT_TURNS = 5;
 var QUIVER_MAX = 24;
 /* stamina: what an action costs.  Being winded doesn't stop you, it makes you weak. */
-var STAM = { melee: 4, bossMelee: 6, bow: 3, run: 3, charge: 12, bolt: 4, summon: 8, chop: 2, build: 1, swim: 2 };
+var STAM = { melee: 4, bossMelee: 6, bow: 3, run: 3, charge: 12, bolt: 4, summon: 8, chop: 2, build: 1,
+             wade: 2, swim: 4 };                             /* shallows are cheap; the deeps are not */
 var HERO_STAM = 40, HERO_STAM_LVL = 4;
 var ELEMENTS = {
   fire:  { n: 'fire',  col: '#ff8a3d', edge: '#ffd7a8', fx: 'blast' },
@@ -713,6 +714,7 @@ function Hero() {
   this.affix = { sword: null, shield: null, armor: null, bow: null, axe: null };
   this.wood = 0; this.scrap = 0; this.pack = [];
   this.boat = 0; this.boatHp = 0; this.sailing = 0; this.swimming = 0; this.chop = null; this.build = null;
+  this.swimT = 0; this.swimGoal = null;
   this.intent = 'descending'; this.lock = null; this.lockT = 0; this.resting = 0; this.ran = 0;
   this.good = (Math.random() - 0.5) * 0.44;                 /* a lean, not a creed */
   this.law = (Math.random() - 0.5) * 0.44;
@@ -837,6 +839,7 @@ function buildFloor(floor) {
   hero.x = spot.x; hero.y = spot.y; hero.px = spot.x; hero.py = spot.y;
   hero.lock = null; hero.lockT = 0; hero.ban = {}; hero.hist = []; hero.lastProgress = tick;
   hero.boat = 0; hero.sailing = 0; hero.swimming = 0; hero.boatHp = 0; hero.chop = null; hero.build = null;
+  hero.swimT = 0; hero.swimGoal = null; hero.swimBan = 0; world.scache = null;
   hero.stam = hero.stamMax; hero.resting = 0; hero.exert = 0;
   run.campAt = null;
   if (run.cache) {                                            /* the stash, hauled down and set out */
@@ -1246,7 +1249,7 @@ function mobCanEnter(m, x, y) {
 function mobPass(m) { return function (x, y) { return mobCanEnter(m, x, y); }; }
 function heroPass(x, y) {
   if (occupied(x, y)) return false;
-  return walkable(x, y) || ((hero.boat || hero.swimming) && tileAt(x, y) <= WATER);
+  return walkable(x, y) || ((hero.boat || hero.swimming || hero.swimT > 0) && tileAt(x, y) <= WATER);
 }
 function isShore(x, y) {
   if (!walkable(x, y)) return false;
@@ -1973,6 +1976,87 @@ var MORAL = {
 };
 function moral(k) { var m = MORAL[k]; stats.moral[k] = (stats.moral[k] || 0) + 1; moralShift(m.g, m.l, k); }
 
+
+/* ---------------- swimming ----------------
+   The hero can take to the water deliberately rather than only after its hull
+   goes.  Wading the shallows is cheap, deep water is not, and a full pack drags
+   you under — so the question at a strait is a real one: chop six wood and spend
+   five turns on a boat, or strip down the load and just swim it.
+
+   The crossing is planned on a 0-1 BFS whose cost is *wetness*: land edges cost
+   nothing, water edges cost one, so the shortest path is the one that spends the
+   fewest tiles out of its depth.  That finds the narrows rather than the short
+   line, which is what anyone eyeing a channel actually looks for. */
+var MAXSWIM = 7;                                            /* tiles of water it will commit to */
+var deq = null;
+function encDrag() { var e = encumbrance(); return e === 2 ? 2.2 : e === 1 ? 1.5 : 1; }
+function strokeCost(deep) { return (deep ? STAM.swim : STAM.wade) * encDrag(); }
+function crossingCost(wet) { return wet * strokeCost(1) * 1.35; }   /* with a margin for weather */
+
+function stepSwim(sx, sy, tx, ty, budget, maxWet) {
+  if (sx === tx && sy === ty) return null;
+  if (!deq) deq = new Int32Array(W * H * 4);
+  stB++;
+  var start = sy * W + sx, goal = ty * W + tx;
+  var dqh = W * H * 2, dqt = dqh;
+  seenB[start] = stB; distB[start] = 0; prevB[start] = start;
+  deq[dqt++] = start;
+  var n = 0, found = false;
+  while (dqh < dqt && n++ < budget) {
+    var cur = deq[dqh++];
+    if (cur === goal) { found = true; break; }
+    var d = distB[cur];
+    if (d > maxWet) continue;
+    var cx = cur % W, cy = (cur - cx) / W;
+    for (var k = 0; k < 4; k++) {
+      var nx = cx + DX[k], ny = cy + DY[k];
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      var ni = ny * W + nx;
+      if (ni !== goal && occupied(nx, ny)) continue;
+      var t = tileAt(nx, ny), wet = t <= WATER ? 1 : 0;
+      if (!wet && !WALK[t]) continue;
+      var nd = d + wet;
+      if (nd > maxWet) continue;
+      if (seenB[ni] === stB && distB[ni] <= nd) continue;
+      seenB[ni] = stB; distB[ni] = nd; prevB[ni] = cur;
+      if (wet) deq[dqt++] = ni; else deq[--dqh] = ni;        /* 0-1 BFS: dry edges jump the queue */
+    }
+  }
+  if (!found) return null;
+  var c = goal, guard = 0;
+  while (prevB[c] !== start && guard++ < W * H) c = prevB[c];
+  var fx = c % W, fy = (c - fx) / W;
+  return { x: fx - sx, y: fy - sy, wet: distB[goal] };
+}
+/* whatever is across the water that the hero actually wants */
+function crossingGoal() {
+  var b = knownBoss();
+  if (b && offIsland(b)) return b;
+  if (run.rumor && islandAt(run.rumor.x, run.rumor.y) !== islandAt(hero.x, hero.y)) return run.rumor;
+  var best = null, bd = 1e9;
+  for (var i = 0; i < items.length; i++) {
+    var o = items[i];
+    if (!o.known || banned(o.id) || !offIsland(o)) continue;
+    var d = dist(hero, o);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+function swimPlan() {
+  if (hero.boat || encumbrance() > 1) return null;            /* too laden to swim it */
+  if (tick < (hero.swimBan || 0)) return null;               /* thought better of it recently */
+  var C = world.scache;
+  if (C && tick - C.t < 25) return C.plan;
+  var plan = null, g = crossingGoal();
+  if (g) {
+    var r = stepSwim(hero.x, hero.y, g.x, g.y, 14000, MAXSWIM);
+    if (r && hero.stam >= crossingCost(r.wet))
+      plan = { kind: 'swim', o: g, wet: r.wet, why: 'swimming it (' + r.wet + ' out of depth)' };
+  }
+  world.scache = { t: tick, plan: plan };
+  return plan;
+}
+
 /* ---------------- hero brain ---------------- */
 /* Targets are committed to for a while, and a target that leads to visible
    dithering gets banned — that kills the hunt/loot flip-flop. */
@@ -1982,6 +2066,7 @@ function targetValid(lk) {
   if (lk.kind === 'mob') return mobs.indexOf(lk.o) >= 0;
   if (lk.kind === 'item') return items.indexOf(lk.o) >= 0;
   if (lk.kind === 'stash' || lk.kind === 'craft' || lk.kind === 'fire') return builds.indexOf(lk.o) >= 0;
+  if (lk.kind === 'swim') return !(hero.x === lk.o.x && hero.y === lk.o.y);
   if (lk.kind === 'trade') return npcs.indexOf(lk.o) >= 0 && wantsOffer(lk.o.offer);
   if (lk.kind === 'rob') return npcs.indexOf(lk.o) >= 0 && !!lk.o.offer;
   if (lk.kind === 'slay') return npcs.indexOf(lk.o) >= 0;
@@ -2107,6 +2192,8 @@ function boatPlan() {
   if (hero.boat) return null;
   var pull = run.rumor && islandAt(run.rumor.x, run.rumor.y) !== islandAt(hero.x, hero.y);
   if (!pull && unexploredHere()) return null;                 /* no reason to sail yet */
+  var sw = swimPlan();
+  if (sw) return sw;                                          /* the strait is narrow: just swim it */
   if (hero.gear.axe < 0) {
     var axe = nearestOf(items, function (o) { return o.kind === 'gear' && o.slot === 'axe'; });
     if (axe) return { kind: 'item', o: axe.o, why: 'seeking an axe' };
@@ -2394,8 +2481,11 @@ function chooseTarget() {
   if (hostileVillage()) for (var hg = 0; hg < npcs.length; hg++)
     if (npcs[hg].t.guard && dist(hero, npcs[hg]) <= 1) return { kind: 'slay', o: npcs[hg], why: 'fighting the guard' };
   if (hero.swimming) {
+    if (hero.swimT > 0 && hero.swimGoal && hero.stam > strokeCost(1) * 2.5)
+      return { kind: 'swim', o: hero.swimGoal, why: 'swimming across' };
     var land = nearestLand();
-    if (land) return { kind: 'spot', o: land, why: 'swimming for shore' };
+    if (land) { hero.swimT = 0; hero.swimBan = tick + 240; world.scache = null;
+      return { kind: 'spot', o: land, why: 'swimming for shore' }; }
   }
   if (hero.hp < hero.max * 0.45 && hero.potions > 0) return { kind: 'quaff' };
   /* out of breath and nothing close: stand still until it comes back.  A
@@ -2611,13 +2701,22 @@ function heroTurn() {
     say('…thinks better of it');
   }
 
-  if (hero.swimming) {
-    if (tileAt(hero.x, hero.y) > WATER) { hero.swimming = 0; say('drags itself ashore'); }
-    else {                                                    /* every stroke costs; spent, it drowns */
-      hero.spend(STAM.swim);
-      if (hero.stam === 0 && tick % 2 === 0) hurtHero(1, null);
+  var onWater = tileAt(hero.x, hero.y) <= WATER;
+  if (hero.swimming && !onWater) {
+    hero.swimming = 0; hero.swimT = 0; hero.swimGoal = null;
+    say('drags itself ashore'); fl(hero.x, hero.y, 'ashore', '#9fd8e6');
+  }
+  if (!hero.boat && onWater) hero.swimming = 1;
+  if (hero.swimming) {                                        /* every stroke costs; spent, it drowns */
+    var deep = tileAt(hero.x, hero.y) === DEEP;
+    hero.spend(strokeCost(deep));
+    if (hero.stam <= 0) {
+      stats.drowning++;
+      hurtHero(deep ? 2 : 1, null);
+      if (tick % 6 === 0) { say(deep ? 'going under!' : 'floundering in the shallows'); fl(hero.x, hero.y, 'drowning', '#7fc7d9'); }
     }
   }
+  if (hero.swimT > 0) hero.swimT--;
   if (!hero.swimming && hero.hp < hero.max && tick % 6 === 0 && !threatNear(8)) hero.hp++;   /* breather */
   if (encumbrance() > 1 && !findBuild('stash') && tick % 4 === 0) shedLoad();
 
@@ -2652,6 +2751,16 @@ function heroTurn() {
   }
   if (tg.kind === 'site') {
     if (hero.x === tg.o.x && hero.y === tg.o.y) { siteTurn(tg.o, tg.site); return; }
+  }
+  if (tg.kind === 'swim') {
+    hero.swimGoal = tg.o;
+    if (hero.swimT <= 0) { hero.swimT = 90; stats.swims++; say('strikes out into the water'); }
+    var sm = stepSwim(hero.x, hero.y, tg.o.x, tg.o.y, 14000, MAXSWIM);
+    if (sm && tryMove(hero, sm.x, sm.y)) {
+      hero.sailing = tileAt(hero.x, hero.y) <= WATER ? 1 : 0;
+      pickUp(); return;
+    }
+    hero.swimT = 0; hero.swimGoal = null; hero.swimBan = tick + 240; hero.lock = null; hero.lockT = 0; return;
   }
   if (tg.kind === 'trade') { if (dist(hero, tg.o) <= 1) { doTrade(tg.o); return; } }
   if (tg.kind === 'rob') { if (dist(hero, tg.o) <= 1) { doRob(tg.o); return; } }
@@ -4187,8 +4296,10 @@ function drawHUD() {
     ctx.fillStyle = '#9fd8e6'; ctx.fillText('hull ' + hero.boatHp + '/3', X + 26, y);
     pips += 2;
   } else if (hero.swimming) {
-    rect(ctx, X + 14, y + 2, 8, 5, '#e8506a');
-    ctx.fillStyle = '#ff9d9d'; ctx.fillText('adrift', X + 26, y);
+    var drown = hero.stam <= 0;
+    rect(ctx, X + 14, y + 2, 8, 5, drown ? '#e8506a' : '#7fc7d9');
+    ctx.fillStyle = drown ? '#ff6b6b' : '#9fd8e6';
+    ctx.fillText(drown ? 'drowning' : tileAt(hero.x, hero.y) === DEEP ? 'swimming' : 'wading', X + 26, y);
     pips += 2;
   }
   for (var e2 = 0; e2 < ELEKEYS.length; e2++) {
@@ -4493,7 +4604,7 @@ function boot() {
   buildBaseSheet(); buildFenceSheet();
   stats = { kills: 0, bosses: 0, deaths: 0, wins: 0, best: 1, unstuck: 0, shots: 0, specials: 0, boats: 0, wrecks: 0,
            builds: 0, crafts: 0, salvaged: 0, villagers: 0, murders: 0, trades: 0, raids: 0, robberies: 0,
-           moral: {}, killers: {} };
+           moral: {}, drowning: 0, swims: 0, killers: {} };
   log = []; tick = 0; shake = 0; run = null; hero = null;
   mobs = []; npcs = []; items = []; builds = []; floats = []; shots = []; fx = [];
   setPhase('play', 0);

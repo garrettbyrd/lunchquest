@@ -354,8 +354,31 @@ down, because validity only asked whether the hero was standing on the tile — 
 would happily go on swinging at a patch of grass. It now asks whether there is still a tree
 there.)
 
-The hero cannot swim. To reach another island it has to find an axe, fell trees for wood
-(each tree takes a few turns and the tile really does become grass), carry six wood to a
+## Swimming
+
+The hero can take to the water deliberately, not only after its hull goes. Wading the
+shallows costs 2 stamina a turn and the deeps cost 4, and a full pack drags: burdened
+multiplies the stroke by 1.5, overloaded by 2.2, and an overloaded hero will not go in at
+all. Run the pool dry and it starts going under — 1 health a turn in the shallows, 2 in
+deep water, until it either reaches a bank or doesn't.
+
+So a strait poses a real question: fell six wood and spend five turns on a boat, or strip
+the load and just swim it. The hero answers it by planning the crossing on a **0-1 BFS whose
+cost is wetness** — dry edges cost nothing and jump the queue, water edges cost one — so the
+shortest path is the one that spends the fewest tiles out of its depth. That finds the
+narrows rather than the short line, which is what anyone eyeing a channel actually looks
+for. It commits only if the crossing is seven wet tiles or fewer and it has the stamina for
+it with a third to spare, and it turns for the nearest bank the moment the wind runs low.
+
+Swimming is worse than sailing in every other way: no bow (both hands are busy), sea
+creatures strike a swimmer harder than a sailor, and there is no hull between the hero and
+the water. In practice both get used — roughly a dozen boats and a handful of swims a
+session.
+
+## Boats and woodcraft
+
+To cross without getting wet the hero has to find an axe, fell trees for wood
+(each tree takes a few turns and the tile really does become a stump), carry six wood to a
 shore tile, and spend five turns building a boat. Driftwood on the beaches is a shortcut
 when no axe has turned up. Boats don't survive the descent to the next floor — the axe
 does — so each floor poses the problem again with a better kit.
