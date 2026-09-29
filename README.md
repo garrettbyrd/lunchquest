@@ -346,14 +346,6 @@ Villagers sit in the same line-of-fire model as everything else, so an arrow tha
 hits it. What the hero does around a village is most of what shapes its character — see
 [The moral compass](#the-moral-compass).
 
-## Boats and woodcraft
-
-A felled tree leaves a **stump** rather than bare grass, so a worked-over wood shows its
-history. (The stump also fixed a real bug: a chop target stayed valid after the tree came
-down, because validity only asked whether the hero was standing on the tile — so the hero
-would happily go on swinging at a patch of grass. It now asks whether there is still a tree
-there.)
-
 ## Swimming
 
 The hero can take to the water deliberately, not only after its hull goes. Wading the
@@ -376,6 +368,12 @@ the water. In practice both get used — roughly a dozen boats and a handful of 
 session.
 
 ## Boats and woodcraft
+
+A felled tree leaves a **stump** rather than bare grass, so a worked-over wood shows its
+history. (The stump also fixed a real bug: a chop target stayed valid after the tree came
+down, because validity only asked whether the hero was standing on the tile — so the hero
+would happily go on swinging at a patch of grass. It now asks whether there is still a tree
+there.)
 
 To cross without getting wet the hero has to find an axe, fell trees for wood
 (each tree takes a few turns and the tile really does become a stump), carry six wood to a
