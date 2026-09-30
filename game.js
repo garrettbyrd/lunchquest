@@ -4946,8 +4946,8 @@ function drawCard() {
     spaced('YOU DIED', VPW / 2, mid, 62, 9, gr);
     rect(ctx, VPW / 2 - 200, mid + 16, 400, 1, 'rgba(180,60,50,.45)');
     spaced('FLOOR ' + run.floor + '  ·  LEVEL ' + hero.lvl + '  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 44, 15, 3, 'rgba(190,180,170,.75)');
-    spaced(alignName().toUpperCase(), VPW / 2, mid + 66, 13, 4, 'rgba(180,150,150,.72)');
-    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 70, 12, 3, 'rgba(150,140,135,.6)');
+    spaced(alignName().toUpperCase(), VPW / 2, mid + 70, 13, 4, 'rgba(180,150,150,.72)');
+    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 94, 12, 3, 'rgba(150,140,135,.6)');
   } else if (phase.name === 'cleared') {
     var g2 = ctx.createLinearGradient(0, mid - 26, 0, mid + 10);
     g2.addColorStop(0, '#ffeeb0'); g2.addColorStop(1, '#a8842f');
@@ -4961,8 +4961,8 @@ function drawCard() {
     spaced('THE UNDYING IS UNMADE', VPW / 2, mid + 24, 18, 5, 'rgba(240,230,200,.85)');
     rect(ctx, VPW / 2 - 200, mid + 40, 400, 1, 'rgba(200,170,90,.45)');
     spaced('LEVEL ' + hero.lvl + '  ·  ' + hero.kills + ' SLAIN  ·  ' + hero.gold + ' GOLD', VPW / 2, mid + 68, 15, 3, 'rgba(220,210,180,.8)');
-    spaced(alignName().toUpperCase(), VPW / 2, mid + 90, 13, 4, 'rgba(220,205,170,.75)');
-    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 94, 12, 3, 'rgba(200,190,160,.6)');
+    spaced(alignName().toUpperCase(), VPW / 2, mid + 94, 13, 4, 'rgba(220,205,170,.75)');
+    spaced('SEED ' + run.seed.toString(16), VPW / 2, mid + 118, 12, 3, 'rgba(200,190,160,.6)');
   } else {
     spaced('LUNCHQUEST', VPW / 2, mid - 10, 54, 12, '#dfe6f2');
     spaced('RUN ' + (run.n + 1), VPW / 2, mid + 26, 17, 6, 'rgba(180,190,210,.7)');
