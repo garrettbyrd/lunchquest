@@ -21,9 +21,9 @@ the shared tilesheet.
 The land boss pool: Vermathrax the Ember, The Broodmother, Grond Bull of the Deep,
 Sablecoil the Basilisk, Aurex Stone Warden, Skarn the Wyvern, The Chimera, Malzeth the
 Necromancer, The Hollow Wraith. Three of the four floor bosses come from there and one
-always comes from the water (see below). Each has one trick — ranged breath,
-minion summoning, a three-tile charge, life drain, or just a lot of armor. The lich does
-most of them at once and heals itself.
+always comes from the water (see below), and on floor 3 or 4 there is a 45% chance that one
+of them is replaced by **the Doppelganger**. Every boss has a signature mechanic of its own —
+see [What each boss does](#what-each-boss-does).
 
 ## Gear
 
@@ -495,6 +495,65 @@ Left alone the sea would therefore go to glass, which is dull and hides the
 refraction. `SEA_SWELL` drips a little wind chop in — three tiny random impulses
 a turn. Set it to zero for a dead-flat, perfectly settling ocean.
 
+## What each boss does
+
+The bosses used to be stat blocks on a timer: fourteen of them shared four behaviours, four
+charged identically, and Aurex's "armor" ability had no code behind it at all. Now each has a
+signature, dispatched from one table, and nearly all of them are borrowed from a system that
+already existed — so the fights are made of the game rather than bolted onto it.
+
+| boss | signature |
+|---|---|
+| Vermathrax | **Scorched earth.** Its breath sets the ground alight. Fire runs through trees and long grass and leaves stumps; near-critical on purpose, so it can take a wood or die in a clearing. |
+| Broodmother | **Egg sacs.** Lays them early and often; each hatches into spiderlings in 22 turns unless broken first. Kill her, or the eggs? |
+| Grond | **Trample.** Charges through trees, smashing them to stumps, and knocks the hero back — into a wall means stunned. In close it shoves you off so it can charge again. |
+| Sablecoil | **Petrifying gaze.** While it has line of sight, the hero's stamina drains; empty, it's frozen solid. The answer is to break sight behind rock. |
+| Aurex | **Shieldwall.** Cycles braced and open. Braced, arrows glance off and blades do half — and the hero learns not to waste arrows on it. |
+| Skarn | **Flight.** The one land boss that crosses water. Swoops in from range; in close it takes wing so it can swoop again. |
+| Chimera | **Three heads.** Fire, frost and lightning in turn, mirroring the elemental arrows — frost freezes the hero, lightning drains its wind, fire lights the grass. Breathes point-blank in melee. |
+| Malzeth | **Raises your kills.** Resurrects what *the hero* killed on this floor, where it fell. The more you killed, the worse. |
+| Hollow Wraith | **Unseen.** Invisible beyond three tiles, walks through walls and rock, and its touch drains stamina as well as life. |
+| Kraken | **Grapple.** Seizes the boat — the hero can fight or shoot but not move, and the hull loses a plank every other turn until it breaks free. |
+| Sturgeon | **Surge.** Thrashes a swell straight through the wave solver that swamps boats and throws the hero aside. |
+| Siren | **Song.** Walks the hero a tile toward the water each turn it's in earshot. Lawful heroes resist it. |
+| Nessa | **Dive.** Submerges — untargetable, just a ring on the water — and surfaces beside the hero. |
+| Xanthemar | **Phylactery.** Cannot die while its phylactery stands, somewhere on the island the hero landed on. The hero won't engage it while warded; it senses the vessel and goes for that first. Breaking it staggers the lich and strips a fifth of its health. |
+
+A signature has to show up early to mean anything, so the long-cooldown ones fire on the
+boss's third or fourth turn and recur from there — otherwise a hero at the right level kills
+the Broodmother before she ever lays an egg. And range tricks have a melee counterpart:
+Grond shoves you away to charge again, Skarn takes wing to swoop again, the Chimera breathes
+point-blank. Without that, a boss whose trick needs distance became a plain stat block the
+moment the hero closed in.
+
+### The Doppelganger
+
+A floor boss on floor 3 or 4, drawn at your size rather than a giant's — which is the
+unsettling part. On contact it **becomes you at your best**: it snapshots your attack,
+defence and health, then takes one piece of gear you are wearing, a tenth of your base
+strength and health, and half your gold, potions, arrows, elemental arrows, wood and scrap.
+
+Then it steps back out of reach and **waits**. It has what it came for; it won't hunt you.
+It holds its ground and answers arrows with your own bow, and the hero won't go back until
+it has its breath and its odds. Its stats are frozen at the moment of the theft, so the way
+through is to grow past who you were — level, buy, reforge — then come back and take it all
+back. Descend without killing it and everything it took is gone.
+
+Getting that right took three passes, all found by measuring. At first it killed every hero
+it met, 6 of 6: the theft lands when the hero is already adjacent, and "fight anything next
+to you" runs before "flee what you can't beat", so it fought to the death at the exact moment
+its odds collapsed. Then it withdrew but still hunted, and caught the fleeing hero within 14
+turns. Then it waited but acted every *other* turn, so "you" fought at half speed and never
+won. Now it waits, moves as you move, and kills about half the heroes it robs.
+
+### Measured
+
+Across seven headless sessions (44 runs): a **16% win rate**, matching the ~15% before any
+of this — the aim was more interesting fights, not an easier or harder game. Eleven different
+bosses claim heroes, where before it was mostly the lich. Every signature was also forced in
+isolation against a hero levelled for its floor and confirmed to fire; the phylactery ward
+was tested directly, since a test hero rarely lasts long enough to drain 700 health.
+
 ## The deep bosses
 
 Four of them, and every run draws exactly one: the Kraken of Still Water (summons its own
@@ -575,7 +634,7 @@ freezes a transition card, `?floor=N` starts on floor N, `?kit=1` hands the hero
 ebony, a dragonbone bow, elemental arrows and a boat, `?seed=hex` replays a run, `?camp=1`
 starts with a camp already standing, `?seatest=1` sails a straight line across open water so
 the wake can be looked at, `?vill=1` drops the hero in the village square, and `?parade=1`
-lines up the whole bestiary next to a frozen hero.
+lines up the whole bestiary — all fifteen bosses and the Doppelganger — next to a frozen hero.
 
 `LQ.sea()` hands back the live height field, and `LQ.splash(x, y, amp, radius)` drops a
 stone in it. `LQ.npcs()` and `LQ.village()` expose the village.
